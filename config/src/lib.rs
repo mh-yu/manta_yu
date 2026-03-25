@@ -205,6 +205,11 @@ impl Committee {
         self.coverage as Stake
     }
 
+    pub fn fast_path_threshold(&self) -> Stake {
+        let total_votes: Stake = self.authorities.values().map(|x| x.stake).sum();
+        2 * total_votes / 3 + 1
+    }
+
     /// Returns the primary addresses of the target primary.
     pub fn primary(&self, to: &PublicKey) -> Result<PrimaryAddresses, ConfigError> {
         self.authorities
