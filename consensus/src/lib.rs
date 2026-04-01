@@ -74,13 +74,14 @@ impl State {
         let certificate_digest = certificate.digest();
         let header_id = certificate.header.id.clone();
 
-        if let Some((old_digest, old_certificate, _old_status)) = self
-            .dag
-            .entry(round)
-            .or_insert_with(HashMap::new)
-            .insert(
+        if let Some((old_digest, old_certificate, _old_status)) =
+            self.dag.entry(round).or_insert_with(HashMap::new).insert(
                 origin,
-                (certificate_digest.clone(), certificate, CommitStatus::Pending),
+                (
+                    certificate_digest.clone(),
+                    certificate,
+                    CommitStatus::Pending,
+                ),
             )
         {
             self.remove_indexes(&old_digest, &old_certificate.header.id);
@@ -227,15 +228,18 @@ impl Consensus {
             // Normal Path
             let step_length = self.committee.solid_step_length();
             let wave_length = self.committee.solid_wave_length();
+            if round < step_length {
+                continue;
+            }
             let r = round - step_length;
-            let leader_round = r - wave_length;
-            let support_round = r - step_length;
             if r % wave_length != 0 {
                 continue;
             }
             if r < 2 * wave_length {
                 continue;
             }
+            let leader_round = r - wave_length;
+            let support_round = r - step_length;
             if leader_round <= state.last_committed_leader_round {
                 debug!(
                     "Skipping leader_round {} because last_committed_leader_round={}",
@@ -372,23 +376,33 @@ impl Consensus {
         if round == 0 {
             return;
         }
+        let Some(current_round_certificates) = state.dag.get(&round) else {
+            return;
+        };
+
         if round > 1
-            && state.dag.get(&round).unwrap().values().len()
+            && current_round_certificates.values().len()
                 < self.committee.quorum_threshold() as usize
         {
             return;
         }
+
         let r = round - 1;
+        let Some(previous_round_certificates) = state.dag.get(&r) else {
+            debug!(
+                "Skipping fast path for round {} because round {} is missing from the DAG",
+                round, r
+            );
+            return;
+        };
+
         let mut one_valent = Vec::new();
         let mut zero_valent = Vec::new();
         let mut bivalent = Vec::new();
 
-        for (_, certificate, _) in state.dag.get(&r).unwrap().values() {
+        for (_, certificate, _) in previous_round_certificates.values() {
             let current_header = &certificate.header;
-            let stake: Stake = state
-                .dag
-                .get(&round)
-                .expect("We should have the whole history by now")
+            let stake: Stake = current_round_certificates
                 .values()
                 .filter(|(_, x, _)| x.header.solid_step_vertices.contains(&current_header.id))
                 .map(|(_, x, _)| self.committee.stake(&x.origin()))
