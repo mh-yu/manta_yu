@@ -110,15 +110,19 @@ impl State {
         self.digest_index.get(digest).copied()
     }
 
-    /// Update and clean up internal state base on committed certificates.
-    fn update(&mut self, certificate: &Certificate, gc_depth: Round) {
+    /// Record that a certificate has been committed without cleaning the DAG yet.
+    fn record_commit(&mut self, certificate: &Certificate) {
         self.last_committed
             .entry(certificate.origin())
             .and_modify(|r| *r = max(*r, certificate.round()))
             .or_insert_with(|| certificate.round());
 
-        let last_committed_certificate_round = *self.last_committed.values().max().unwrap();
-        self.last_committed_certificate_round = last_committed_certificate_round;
+        self.last_committed_certificate_round = *self.last_committed.values().max().unwrap();
+    }
+
+    /// Clean up internal DAG state using the rounds recorded as committed.
+    fn cleanup_committed_history(&mut self, gc_depth: Round) {
+        let last_committed_certificate_round = self.last_committed_certificate_round;
         let last_committed = &self.last_committed;
         let mut removed = Vec::new();
 
@@ -263,10 +267,13 @@ impl Consensus {
             // The Manta-specific part is the support basis: rather than direct parent edges, we
             // use `solid_wave_vertices` from the support round.
             let leader_header_id = leader.header.id.clone();
-            let support_round_map = state
-                .dag
-                .get(&support_round)
-                .expect("Support round should exist in the local DAG");
+            let Some(support_round_map) = state.dag.get(&support_round) else {
+                debug!(
+                    "Skipping leader_round {} because support_round {} is missing from the DAG",
+                    leader_round, support_round
+                );
+                continue;
+            };
             let debug_logging = log_enabled!(log::Level::Debug);
             let mut support_nodes = Vec::new();
             let mut support_entries: Option<Vec<String>> = if debug_logging {
@@ -338,11 +345,12 @@ impl Consensus {
             let mut sequence = Vec::new();
             for leader in self.order_leaders(&leader, &state).iter().rev() {
                 for x in self.order_dag(leader, &state) {
-                    state.update(&x, self.gc_depth);
+                    state.record_commit(&x);
                     sequence.push(x);
                 }
             }
             state.update_last_committed_leader(leader_round);
+            state.cleanup_committed_history(self.gc_depth);
 
             for certificate in sequence {
                 let node_id = self.author_to_node_id(certificate.origin());
@@ -440,7 +448,7 @@ impl Consensus {
                     info!("Committed {} -> {:?}", certificate.header, digest);
                 }
 
-                state.update(&certificate, self.gc_depth);
+                state.record_commit(&certificate);
                 self.tx_primary
                     .send(certificate.clone())
                     .await
