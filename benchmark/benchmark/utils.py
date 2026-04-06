@@ -11,7 +11,6 @@ from benchmark.dag_vis import (
     build_annotated_dag_snapshot,
     collect_best_round_snapshots,
     export_dag_event_csv,
-    export_dag_overview_html,
     export_dag_overview_json,
 )
 
@@ -351,12 +350,6 @@ class PathMaker:
         )
         if dag_overview_json:
             artifacts['dag_overview_json'] = dag_overview_json
-
-        dag_overview_html = export_dag_overview_html(
-            snapshot, PathMaker.dag_overview_html_file()
-        )
-        if dag_overview_html:
-            artifacts['dag_overview_html'] = dag_overview_html
 
         return artifacts
 
