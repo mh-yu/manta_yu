@@ -1,7 +1,7 @@
 node
 benchmark_client
 results
-manta_result
+manta_result/*/log/
 plots
 
 # Byte-compiled / optimized / DLL files

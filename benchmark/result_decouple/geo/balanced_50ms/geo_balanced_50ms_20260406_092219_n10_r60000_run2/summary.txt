@@ -1,0 +1,35 @@
+
+-----------------------------------------
+ SUMMARY:
+-----------------------------------------
+ + CONFIG:
+ Network tag: geo
+ Workload tag: balanced_50ms
+ Rate type: balanced
+ Run index: 2/2
+ Run folder: geo_balanced_50ms_20260406_092219_n10_r60000_run2
+ Faults: 0 node(s)
+ Committee size: 10 node(s)
+ Worker(s) per node: 1 worker(s)
+ Collocate primary and workers: True
+ Input rate: 60,000 tx/s
+ Transaction size: 512 B
+ Execution time: 121 s
+
+ Header size: 1,000 B
+ Max header delay: 50 ms
+ GC depth: 50 round(s)
+ Sync retry delay: 1,000 ms
+ Sync retry nodes: 7 node(s)
+ batch size: 128,000 B
+ Max batch delay: 50 ms
+
+ + RESULTS:
+ Consensus TPS: 53,449 tx/s
+ Consensus BPS: 27,365,920 B/s
+ Consensus latency: 1,498 ms
+
+ End-to-end TPS: 53,144 tx/s
+ End-to-end BPS: 27,209,888 B/s
+ End-to-end latency: 1,836 ms
+-----------------------------------------
