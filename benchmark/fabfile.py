@@ -266,7 +266,7 @@ def cloudlab_remote(
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'rate': [60000],
+        'rate': [20000,40000,60000,80000,100000,120000,140000],
         'tx_size': 512,
         'duration': 20,
         'runs': 1,
