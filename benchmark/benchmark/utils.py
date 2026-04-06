@@ -121,6 +121,11 @@ class PathMaker:
         return join(PathMaker.base_results_path(), PathMaker.LATEST_RUN_FILE)
 
     @staticmethod
+    def run_metadata_file(run_dir=None):
+        run_dir = run_dir or PathMaker.current_run_path()
+        return join(run_dir, 'run_metadata.json') if run_dir else None
+
+    @staticmethod
     def output_path():
         return PathMaker.current_run_path() or PathMaker.base_results_path()
 
@@ -149,6 +154,37 @@ class PathMaker:
         return run_dir
 
     @staticmethod
+    def load_run_metadata(run_dir=None):
+        metadata_file = PathMaker.run_metadata_file(run_dir)
+        if metadata_file is None or not os.path.exists(metadata_file):
+            return {}
+
+        with open(metadata_file, 'r') as f:
+            return json.load(f)
+
+    @staticmethod
+    def update_run_metadata(extra_metadata, run_dir=None):
+        assert isinstance(extra_metadata, dict)
+
+        run_dir = run_dir or PathMaker.current_run_path()
+        if not run_dir:
+            return {}
+
+        os.makedirs(run_dir, exist_ok=True)
+        metadata = PathMaker.load_run_metadata(run_dir)
+        for key, value in extra_metadata.items():
+            if isinstance(value, dict) and isinstance(metadata.get(key), dict):
+                metadata[key].update(value)
+            else:
+                metadata[key] = value
+
+        metadata_file = PathMaker.run_metadata_file(run_dir)
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f, indent=2)
+            f.write('\n')
+        return metadata
+
+    @staticmethod
     def _sanitize_label(label):
         label = re.sub(r'[^A-Za-z0-9._-]+', '-', label.strip())
         return label.strip('-') or 'run'
@@ -167,17 +203,14 @@ class PathMaker:
             run_dir = join(base_dir, f'{timestamp}_{safe_label}_{counter}')
 
         PathMaker.activate_run_directory(run_dir)
-        with open(join(run_dir, 'run_metadata.json'), 'w') as f:
-            json.dump(
-                {
-                    'created_at_utc': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
-                    'label': safe_label,
-                    'run_dir': run_dir,
-                },
-                f,
-                indent=2,
-            )
-            f.write('\n')
+        PathMaker.update_run_metadata(
+            {
+                'created_at_utc': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+                'label': safe_label,
+                'run_dir': run_dir,
+            },
+            run_dir=run_dir,
+        )
         return run_dir
 
     @staticmethod

@@ -216,6 +216,20 @@ class LogParser:
         sync_retry_nodes = self.configs[0]['sync_retry_nodes']
         batch_size = self.configs[0]['batch_size']
         max_batch_delay = self.configs[0]['max_batch_delay']
+        run_metadata = PathMaker.load_run_metadata()
+        node_params = run_metadata.get('node_params', {})
+
+        extra_config_lines = ''
+        for label, key in (
+            ('Sigma', 'sigma'),
+            ('Kappa', 'kappa'),
+            ('Reference', 'reference'),
+            ('Coverage', 'coverage'),
+            ('Design tag', 'design_tag'),
+        ):
+            value = node_params.get(key)
+            if value is not None:
+                extra_config_lines += f' {label}: {value}\n'
 
         consensus_latency = self._consensus_latency() * 1_000
         consensus_tps, consensus_bps, _ = self._consensus_throughput()
@@ -243,6 +257,7 @@ class LogParser:
             f' Sync retry nodes: {sync_retry_nodes:,} node(s)\n'
             f' batch size: {batch_size:,} B\n'
             f' Max batch delay: {max_batch_delay:,} ms\n'
+            f'{extra_config_lines}'
             '\n'
             ' + RESULTS:\n'
             f' Consensus TPS: {round(consensus_tps):,} tx/s\n'

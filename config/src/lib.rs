@@ -183,7 +183,6 @@ impl Committee {
 
     pub fn processing_threshold(&self, current_round: u64) -> Stake {
         // Apart from the quorum threshold, this is specially for processing headers.
-        let total_votes: Stake = self.authorities.values().map(|x| x.stake).sum();
         if self.is_solid_step(current_round) {
             return self.coverage as Stake;
             // return (total_votes + 2) / 3;
@@ -280,9 +279,45 @@ impl Committee {
         (self.sigma) as u64
     }
 
-    /// Returns whether the provided round is the first round of a solid step.
+    /// Returns whether the provided round is a solid-step boundary.
+    /// Solid steps overlap on their boundary round, so for sigma=2 the
+    /// boundaries are 1, 3, 5, ...
     pub fn is_solid_step(&self, round: u64) -> bool {
-        round > 1 && round % self.solid_step_length() == 0
+        round > 1 && (round - 1) % self.solid_step_length() == 0
+    }
+
+    /// Returns whether the provided round is a solid-wave boundary.
+    /// Solid waves overlap on their boundary round, so for wave length 4 the
+    /// boundaries are 1, 5, 9, ...
+    pub fn is_solid_wave(&self, round: u64) -> bool {
+        round > 1 && (round - 1) % self.solid_wave_length() == 0
+    }
+
+    fn overlapping_segment_start_before(round: u64, length: u64) -> u64 {
+        if round <= 1 {
+            0
+        } else {
+            1 + ((round - 2) / length) * length
+        }
+    }
+
+    /// Returns the first parent round in the solid step that ends at `round`.
+    pub fn solid_step_parent_start(&self, round: u64) -> u64 {
+        Self::overlapping_segment_start_before(round, self.solid_step_length())
+    }
+
+    /// Returns the first parent round in the solid wave that ends at `round`.
+    pub fn solid_wave_parent_start(&self, round: u64) -> u64 {
+        Self::overlapping_segment_start_before(round, self.solid_wave_length())
+    }
+
+    /// Returns the solid-wave boundary at or before the provided round.
+    pub fn solid_wave_boundary_at_or_before(&self, round: u64) -> u64 {
+        if round == 0 {
+            0
+        } else {
+            1 + ((round - 1) / self.solid_wave_length()) * self.solid_wave_length()
+        }
     }
 }
 
@@ -307,5 +342,53 @@ impl KeyPair {
 impl Default for KeyPair {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Committee;
+    use std::collections::BTreeMap;
+
+    fn overlapping_committee() -> Committee {
+        Committee {
+            authorities: BTreeMap::new(),
+            sigma: 2,
+            kappa: 2,
+            reference: 0,
+            coverage: 0,
+        }
+    }
+
+    #[test]
+    fn overlapping_boundaries_match_design() {
+        let committee = overlapping_committee();
+
+        assert!(!committee.is_solid_step(2));
+        assert!(committee.is_solid_step(3));
+        assert!(!committee.is_solid_step(4));
+        assert!(committee.is_solid_step(5));
+
+        assert!(!committee.is_solid_wave(3));
+        assert!(!committee.is_solid_wave(4));
+        assert!(committee.is_solid_wave(5));
+        assert!(!committee.is_solid_wave(8));
+        assert!(committee.is_solid_wave(9));
+    }
+
+    #[test]
+    fn overlapping_parent_windows_match_design() {
+        let committee = overlapping_committee();
+
+        assert_eq!(committee.solid_step_parent_start(2), 1);
+        assert_eq!(committee.solid_step_parent_start(3), 1);
+        assert_eq!(committee.solid_step_parent_start(4), 3);
+        assert_eq!(committee.solid_step_parent_start(5), 3);
+
+        assert_eq!(committee.solid_wave_parent_start(3), 1);
+        assert_eq!(committee.solid_wave_parent_start(5), 1);
+        assert_eq!(committee.solid_wave_parent_start(6), 5);
+        assert_eq!(committee.solid_wave_parent_start(8), 5);
+        assert_eq!(committee.solid_wave_parent_start(9), 5);
     }
 }

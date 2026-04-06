@@ -17,11 +17,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from benchmark.logs import LogParser, ParseError
 from benchmark.utils import PathMaker, Print, BenchError
 
-def run_fab_command(task='cloudlab_remote', debug=False):
+def run_fab_command(task='cloudlab_remote', debug=False, fab_kwargs=None):
     """Run fab command"""
     fab_cmd = ['fab', task]
     if debug:
         fab_cmd.append('debug=True')
+    for key, value in (fab_kwargs or {}).items():
+        fab_cmd.append(f'{key}={value}')
     
     Print.info(f'Running: {" ".join(fab_cmd)}')
     Print.info('=' * 60)
@@ -153,6 +155,16 @@ Examples:
                        help='Maximum number of workers per node for log download (default: 1)')
     parser.add_argument('--settings', default='cloudlab_settings.json',
                        help='Path to CloudLab settings file (default: cloudlab_settings.json)')
+    parser.add_argument('--sigma', type=int, default=2,
+                       help='Sigma value for cloudlab_remote (default: 2)')
+    parser.add_argument('--kappa', type=int, default=2,
+                       help='Kappa value for cloudlab_remote (default: 2)')
+    parser.add_argument('--reference', type=int, default=4,
+                       help='Reference value for cloudlab_remote (default: 4)')
+    parser.add_argument('--coverage', type=int, default=7,
+                       help='Coverage value for cloudlab_remote (default: 7)')
+    parser.add_argument('--design-tag', default='manta',
+                       help='Design tag written to summary and run directory name (default: manta)')
     
     args = parser.parse_args()
     
@@ -171,7 +183,17 @@ Examples:
     
     # Step 1: Run benchmark (unless skipped)
     if not args.no_run and not args.download_only:
-        success = run_fab_command('cloudlab_remote', debug=args.debug)
+        success = run_fab_command(
+            'cloudlab_remote',
+            debug=args.debug,
+            fab_kwargs={
+                'sigma': args.sigma,
+                'kappa': args.kappa,
+                'reference': args.reference,
+                'coverage': args.coverage,
+                'design_tag': args.design_tag,
+            },
+        )
         if not success:
             Print.warn('Benchmark run completed with errors, but continuing to process logs...')
         current_run = PathMaker.current_run_path()

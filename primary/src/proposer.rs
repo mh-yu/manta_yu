@@ -168,7 +168,7 @@ impl Proposer {
     }
 
     fn is_critical_round(&self, round: Round) -> bool {
-        round > 1 && round % self.solid_step_length == 0
+        round > 1 && (round - 1) % self.solid_step_length == 0
     }
 
     fn is_intermediate_round(&self, round: Round) -> bool {
@@ -180,7 +180,7 @@ impl Proposer {
             return None;
         }
 
-        Some(((round / self.solid_step_length) + 1) * self.solid_step_length)
+        Some(1 + (((round - 1) / self.solid_step_length) + 1) * self.solid_step_length)
     }
 
     fn critical_round_started(&self, round: Round) -> bool {
@@ -406,17 +406,17 @@ impl Proposer {
         // - all other rounds: vertices = merged = union(parent.merged)
         debug!("the number of the parents is {}", header.parents.len());
 
-        let is_solid_step_init_round =
-            round == 1 || (round > 1 && round % self.solid_step_length == 0);
-        let is_solid_wave_end_round =
-            round == 1 || (round > 1 && round % self.solid_wave_length == 0);
+        let is_solid_step_boundary =
+            round == 1 || (round > 1 && (round - 1) % self.solid_step_length == 0);
+        let is_solid_wave_boundary =
+            round == 1 || (round > 1 && (round - 1) % self.solid_wave_length == 0);
         if round == 1 {
             let parent_set: HashSet<Digest> = unlocked_round.parents.into_iter().collect();
             header.store_solid_step_vertex(parent_set.clone());
             header.store_solid_step_merged_vertices(parent_set.clone());
             header.store_solid_wave_vertex(parent_set.clone());
             header.store_solid_wave_merged_vertices(parent_set);
-        } else if is_solid_step_init_round {
+        } else if is_solid_step_boundary {
             header.store_solid_step_vertex(unlocked_round.solid_step_union);
 
             let mut self_only: HashSet<Digest> = HashSet::new();
@@ -426,7 +426,7 @@ impl Proposer {
             header.store_solid_step_vertex(unlocked_round.solid_step_union.clone());
             header.store_solid_step_merged_vertices(unlocked_round.solid_step_union);
         }
-        if is_solid_wave_end_round {
+        if is_solid_wave_boundary {
             header.store_solid_wave_vertex(unlocked_round.solid_wave_union);
 
             let mut self_only: HashSet<Digest> = HashSet::new();

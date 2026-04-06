@@ -135,12 +135,8 @@ impl CertificatesAggregator {
         // Accept parents from the whole solid-wave window, but only the newer
         // solid-step sub-window contributes to processing/solid-step checks.
         let current_round = self.expected_round + 1;
-        let step_len = committee.solid_step_length();
-        let wave_len = committee.solid_wave_length();
-        let step_index: Round = ((current_round - 1) % step_len) + 1;
-        let wave_index: Round = ((current_round - 1) % wave_len) + 1;
-        let regular_weak_start: Round = current_round.saturating_sub(step_index);
-        let commit_weak_start: Round = current_round.saturating_sub(wave_index);
+        let regular_weak_start = committee.solid_step_parent_start(current_round);
+        let commit_weak_start = committee.solid_wave_parent_start(current_round);
 
         // Add the certificate to the appropriate list.
         if certificate.round() == self.expected_round {

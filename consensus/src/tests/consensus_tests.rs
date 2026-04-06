@@ -5,7 +5,7 @@ use crypto::{generate_keypair, SecretKey};
 use primary::Header;
 use rand::rngs::StdRng;
 use rand::SeedableRng as _;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use tokio::sync::mpsc::channel;
 
 // Fixture
@@ -33,6 +33,10 @@ pub fn mock_committee() -> Committee {
                 )
             })
             .collect(),
+        sigma: 2,
+        kappa: 2,
+        reference: 3,
+        coverage: 3,
     }
 }
 

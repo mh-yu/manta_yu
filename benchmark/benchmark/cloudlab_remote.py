@@ -1547,10 +1547,35 @@ SCRIPTEOF'''
                         Print.heading(f'\nRunning benchmark: nodes={n}, rate={rate}{attack_str}, run={run+1}/{bench_parameters.runs}')
                         
                         try:
+                            design_tag = node_parameters.json.get('design_tag')
                             run_label = f'cloudlab-n{n}-r{rate}-run{run+1}'
+                            if design_tag:
+                                run_label += f'-tag-{design_tag}'
                             if trigger_attack is not None:
                                 run_label += f'-attack-{"on" if trigger_attack else "off"}'
                             run_dir = PathMaker.create_run_directory(run_label)
+                            PathMaker.update_run_metadata(
+                                {
+                                    'benchmark_type': 'cloudlab',
+                                    'bench_params': {
+                                        'faults': bench_parameters.faults,
+                                        'nodes': n,
+                                        'workers': bench_parameters.workers,
+                                        'collocate': bench_parameters.collocate,
+                                        'rate': rate,
+                                        'rate_type': getattr(bench_parameters, 'rate_type', None),
+                                        'tx_size': bench_parameters.tx_size,
+                                        'duration': bench_parameters.duration,
+                                        'run': run + 1,
+                                    },
+                                    'node_params': {
+                                        key: value
+                                        for key, value in node_parameters.json.items()
+                                        if key in ('sigma', 'kappa', 'reference', 'coverage', 'design_tag')
+                                    },
+                                },
+                                run_dir=run_dir,
+                            )
                             Print.info(f'Run outputs directory: {run_dir}')
                             # Run the actual benchmark
                             self._run_single(
