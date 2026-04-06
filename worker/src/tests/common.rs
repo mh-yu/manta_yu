@@ -59,6 +59,7 @@ pub fn committee() -> Committee {
         reference: 3,
         coverage: 3,
         allow_cross_step_weak_edges: true,
+        enable_fast_coin: false,
     }
 }
 

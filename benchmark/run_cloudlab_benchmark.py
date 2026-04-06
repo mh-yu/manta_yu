@@ -174,6 +174,13 @@ Examples:
                        action='store_false',
                        help='Disable weak edges that cross solid-step boundaries; keep weak edges inside each solid step')
     parser.set_defaults(allow_cross_step_weak_edges=True)
+    parser.add_argument('--fast-coin', dest='enable_fast_coin',
+                       action='store_true',
+                       help='Enable the fast-coin commit path that starts one round earlier than the regular check')
+    parser.add_argument('--no-fast-coin', dest='enable_fast_coin',
+                       action='store_false',
+                       help='Disable the fast-coin commit path')
+    parser.set_defaults(enable_fast_coin=False)
     parser.add_argument('--design-tag', default='manta',
                        help='Design tag written to summary and run directory name (default: manta)')
     
@@ -203,6 +210,7 @@ Examples:
                 'reference': args.reference,
                 'coverage': args.coverage,
                 'allow_cross_step_weak_edges': args.allow_cross_step_weak_edges,
+                'enable_fast_coin': args.enable_fast_coin,
                 'design_tag': args.design_tag,
             },
         )

@@ -970,6 +970,10 @@ class CloudLabBench:
             'allow_cross_step_weak_edges',
             True,
         )
+        enable_fast_coin = node_parameters.json.get(
+            'enable_fast_coin',
+            False,
+        )
         committee = Committee(
             addresses,
             self.settings.base_port,
@@ -978,6 +982,7 @@ class CloudLabBench:
             reference,
             coverage,
             allow_cross_step_weak_edges,
+            enable_fast_coin,
         )
         committee.print(PathMaker.committee_file())
         

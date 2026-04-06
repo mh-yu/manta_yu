@@ -14,6 +14,10 @@ fn default_allow_cross_step_weak_edges() -> bool {
     true
 }
 
+fn default_enable_fast_coin() -> bool {
+    false
+}
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("Node {0} is not in the committee")]
@@ -156,6 +160,10 @@ pub struct Committee {
     /// solid steps that are still inside the current solid-wave window.
     #[serde(default = "default_allow_cross_step_weak_edges")]
     pub allow_cross_step_weak_edges: bool,
+    /// Whether to enable the fast-coin path, which starts one round earlier
+    /// than the regular solid-wave commit check.
+    #[serde(default = "default_enable_fast_coin")]
+    pub enable_fast_coin: bool,
 }
 
 impl Import for Committee {}
@@ -377,6 +385,7 @@ mod tests {
             reference: 0,
             coverage: 0,
             allow_cross_step_weak_edges: true,
+            enable_fast_coin: false,
         }
     }
 

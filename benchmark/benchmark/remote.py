@@ -192,7 +192,14 @@ class Bench:
             addresses = OrderedDict(
                 (x, y) for x, y in zip(names, hosts)
             )
-        committee = Committee(addresses, self.settings.base_port)
+        committee = Committee(
+            addresses,
+            self.settings.base_port,
+            sigma=2,
+            kappa=2,
+            reference=4,
+            coverage=7,
+        )
         committee.print(PathMaker.committee_file())
 
         node_parameters.print(PathMaker.parameters_file())

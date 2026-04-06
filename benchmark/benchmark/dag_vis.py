@@ -152,13 +152,15 @@ def parse_final_dag(path: str) -> Dict[int, List[Dict[str, Any]]]:
 
 
 def parse_consensus_events(log_path: str) -> Dict[str, Any]:
-    leader_events: Dict[int, Dict[str, Any]] = {}
+    leader_events: Dict[tuple[str, int, int], Dict[str, Any]] = {}
+    leader_markers_by_round: Dict[int, Dict[str, Any]] = {}
     committed_nodes_by_round: Dict[int, set[int]] = defaultdict(set)
 
     if not log_path or not os.path.exists(log_path):
         return {
             "log_path": log_path,
             "leader_events": leader_events,
+            "leader_markers_by_round": leader_markers_by_round,
             "committed_nodes_by_round": committed_nodes_by_round,
         }
 
@@ -177,7 +179,9 @@ def parse_consensus_events(log_path: str) -> Dict[str, Any]:
                 threshold = int(commit_match.group("threshold"))
                 result = commit_match.group("result")
                 support_set = _split_ints(commit_match.group("support_set"))
+                path = commit_match.group("path")
                 attempt_key = (
+                    path,
                     leader_round,
                     support_round,
                     trigger_round,
@@ -190,9 +194,11 @@ def parse_consensus_events(log_path: str) -> Dict[str, Any]:
                     continue
                 seen_attempts.add(attempt_key)
 
+                event_key = (path, leader_round, support_round)
                 event = leader_events.setdefault(
-                    leader_round,
+                    event_key,
                     {
+                        "event_key": list(event_key),
                         "leader_round": leader_round,
                         "leader_node": int(commit_match.group("leader_node")),
                         "support_round": support_round,
@@ -204,6 +210,13 @@ def parse_consensus_events(log_path: str) -> Dict[str, Any]:
                         "final_result": result,
                         "final_stake": stake,
                         "final_support_set": support_set,
+                    },
+                )
+                leader_markers_by_round.setdefault(
+                    leader_round,
+                    {
+                        "leader_round": leader_round,
+                        "leader_node": int(commit_match.group("leader_node")),
                     },
                 )
                 event["attempts"].append(
@@ -242,6 +255,7 @@ def parse_consensus_events(log_path: str) -> Dict[str, Any]:
     return {
         "log_path": log_path,
         "leader_events": leader_events,
+        "leader_markers_by_round": leader_markers_by_round,
         "committed_nodes_by_round": committed_nodes_by_round,
     }
 
@@ -251,10 +265,15 @@ def build_annotated_dag_snapshot(final_dag_path: str, log_files: List[str]) -> D
     selected_log = select_consensus_log(log_files)
     event_state = parse_consensus_events(selected_log) if selected_log else parse_consensus_events("")
     leader_events = event_state["leader_events"]
+    leader_markers_by_round = event_state["leader_markers_by_round"]
     committed_nodes_by_round = event_state["committed_nodes_by_round"]
+    leader_event_list = sorted(
+        leader_events.values(),
+        key=lambda event: (event["leader_round"], event["support_round"], event["path"]),
+    )
 
     support_events_by_round: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
-    for event in leader_events.values():
+    for event in leader_event_list:
         support_events_by_round[event["support_round"]].append(event)
 
     rounds = []
@@ -263,30 +282,38 @@ def build_annotated_dag_snapshot(final_dag_path: str, log_files: List[str]) -> D
             {
                 "round": round_num,
                 "vertices": rounds_map[round_num],
-                "leader_event": leader_events.get(round_num),
+                "leader_event": leader_markers_by_round.get(round_num),
                 "support_events": sorted(
                     support_events_by_round.get(round_num, []),
-                    key=lambda item: item["leader_round"],
+                    key=lambda item: (item["leader_round"], item["support_round"], item["path"]),
                 ),
                 "committed_nodes": sorted(committed_nodes_by_round.get(round_num, set())),
             }
         )
 
-    leader_event_list = [leader_events[key] for key in sorted(leader_events)]
+    leader_event_groups: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    for event in leader_event_list:
+        leader_event_groups[event["leader_round"]].append(event)
     committed_event_count = sum(
-        1 for event in leader_event_list if event["final_result"] == "committed"
+        1
+        for events in leader_event_groups.values()
+        if any(event["final_result"] == "committed" for event in events)
     )
-    attempt_counts = [event["attempt_count"] for event in leader_event_list]
+    attempt_counts = [
+        sum(event["attempt_count"] for event in events)
+        for events in leader_event_groups.values()
+    ]
     support_gaps = [
-        event["support_round"] - event["leader_round"] for event in leader_event_list
+        min(event["support_round"] - event["leader_round"] for event in events)
+        for events in leader_event_groups.values()
     ]
 
     summary = {
         "selected_log": selected_log,
-        "leader_rounds": len(leader_event_list),
+        "leader_rounds": len(leader_event_groups),
         "committed_leader_rounds": committed_event_count,
         "commit_success_rate": (
-            committed_event_count / len(leader_event_list) if leader_event_list else 0.0
+            committed_event_count / len(leader_event_groups) if leader_event_groups else 0.0
         ),
         "avg_attempts_per_leader": mean(attempt_counts) if attempt_counts else 0.0,
         "avg_support_gap": mean(support_gaps) if support_gaps else 0.0,
@@ -303,13 +330,17 @@ def export_dag_event_csv(log_files: List[str], output_file: str) -> Optional[str
         return None
 
     event_state = parse_consensus_events(selected_log)
-    leader_events = event_state["leader_events"]
+    leader_event_list = sorted(
+        event_state["leader_events"].values(),
+        key=lambda event: (event["leader_round"], event["support_round"], event["path"]),
+    )
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     with open(output_file, "w", newline="") as f:
         writer = csv.DictWriter(
             f,
             fieldnames=[
+                "path",
                 "leader_round",
                 "leader_node",
                 "support_round",
@@ -323,10 +354,10 @@ def export_dag_event_csv(log_files: List[str], output_file: str) -> Optional[str
             ],
         )
         writer.writeheader()
-        for leader_round in sorted(leader_events):
-            event = leader_events[leader_round]
+        for event in leader_event_list:
             writer.writerow(
                 {
+                    "path": event["path"],
                     "leader_round": event["leader_round"],
                     "leader_node": event["leader_node"],
                     "support_round": event["support_round"],
@@ -359,13 +390,19 @@ def _leader_badge(event: Dict[str, Any]) -> str:
     )
 
 
+def _path_label(path: str) -> str:
+    if path == "fast_coin":
+        return "fast coin"
+    return path
+
+
 def _support_badges(events: List[Dict[str, Any]]) -> str:
     badges = []
     for event in events:
         css = "badge-ok" if event["final_result"] == "committed" else "badge-warn"
         result_text = "已提交" if event["final_result"] == "committed" else event["final_result"]
         badges.append(
-            f'<span class="badge {css}">检查 r{event["leader_round"]}，support 轮 r{event["support_round"]}，触发轮 r{event.get("trigger_round", event["support_round"])}: '
+            f'<span class="badge {css}">{html.escape(_path_label(event["path"]))} 检查 r{event["leader_round"]}，support 轮 r{event["support_round"]}，触发轮 r{event.get("trigger_round", event["support_round"])}: '
             f'{html.escape(result_text)}</span>'
         )
     return "".join(badges)
@@ -415,7 +452,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
             )
         if support_events:
             summary_parts = [
-                f'r{event["leader_round"]}/s{event["support_round"]}->{("已提交" if event["final_result"] == "committed" else event["final_result"])}'
+                f'{_path_label(event["path"])}:r{event["leader_round"]}/s{event["support_round"]}->{("已提交" if event["final_result"] == "committed" else event["final_result"])}'
                 for event in support_events
             ]
             header_lines.append(
@@ -710,7 +747,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
   <main>
     <section class="panel">
       <h1>带提交标注的 DAG 总览</h1>
-      <p>当前语义：第一次在下一轮首个顶点到达时激活检查；之后只要 support round 有晚到证书，就对同一组 leader/support 重新检查，直到成功提交或进入下一次检查窗口。</p>
+      <p>当前语义：第一次在下一轮首个顶点到达时激活检查；之后只要 support round 有晚到证书，就对同一组 leader/support 重新检查，直到成功提交或进入下一次检查窗口。若启用 fast coin，则同一 leader 还会多出一条更早启动的检查路径，任一路径先满足阈值即可提交。</p>
       <p>来源日志: {html.escape(summary.get("selected_log") or "-")}</p>
       <p>图中仅展示前 {rendered_round_count} 轮；上方统计指标仍基于全量 DAG 轮次与提交事件计算。</p>
       <div class="metrics">

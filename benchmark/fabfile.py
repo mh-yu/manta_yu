@@ -58,6 +58,7 @@ def local(ctx, debug=False):
         'reference': 4,
         'coverage': 7,
         'allow_cross_step_weak_edges': True,
+        'enable_fast_coin': False,
         's': 0.99
     }
     try:
@@ -251,10 +252,12 @@ def cloudlab_remote(
     reference=4,
     coverage=7,
     allow_cross_step_weak_edges=True,
-    design_tag='manta-no-commitonly',
+    enable_fast_coin=True,
+    design_tag='manta-fast-coin',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
+    enable_fast_coin = _coerce_bool(enable_fast_coin)
     bench_params = {
         'faults': 0,
         'nodes': [10],
@@ -279,6 +282,7 @@ def cloudlab_remote(
         'reference': reference,
         'coverage': coverage,
         'allow_cross_step_weak_edges': allow_cross_step_weak_edges,
+        'enable_fast_coin': enable_fast_coin,
         'design_tag': design_tag,
         # 's': 0.99,
     }

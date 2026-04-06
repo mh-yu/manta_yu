@@ -38,6 +38,7 @@ pub fn mock_committee() -> Committee {
         reference: 3,
         coverage: 3,
         allow_cross_step_weak_edges: true,
+        enable_fast_coin: false,
     }
 }
 
@@ -418,7 +419,7 @@ async fn late_support_certificate_rechecks_pending_commit() {
     state.insert(activation_round_4.clone());
 
     let mut pending = consensus
-        .pending_commit_check_for_round(4, &state)
+        .solid_pending_commit_check_for_round(4, &state)
         .expect("round 4 should activate a pending commit check");
 
     let committed = consensus
@@ -443,4 +444,104 @@ async fn late_support_certificate_rechecks_pending_commit() {
     let committed_leader = rx_output.recv().await.unwrap();
     assert_eq!(committed_leader.round(), 1);
     assert_eq!(committed_leader.origin(), leader_author);
+}
+
+#[tokio::test]
+async fn fast_coin_commits_before_regular_path() {
+    let committee = Committee {
+        enable_fast_coin: true,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let genesis_parents = genesis_certs
+        .iter()
+        .map(|certificate| certificate.digest())
+        .collect::<BTreeSet<_>>();
+
+    let leader_author = authorities[0];
+    let supporter_a = authorities[1];
+    let supporter_b = authorities[2];
+
+    let (_, leader_round_1) = mock_certificate(leader_author, 1, genesis_parents.clone());
+    let leader_header_id = leader_round_1.header.id.clone();
+
+    let mut support_vertices = HashSet::new();
+    support_vertices.insert(leader_header_id.clone());
+
+    let (_, support_round_2_a) = mock_certificate_with_solid_wave(
+        supporter_a,
+        2,
+        BTreeSet::new(),
+        support_vertices.clone(),
+    );
+    let (_, support_round_2_b) = mock_certificate_with_solid_wave(
+        supporter_b,
+        2,
+        BTreeSet::new(),
+        support_vertices.clone(),
+    );
+    let (_, activation_round_3) =
+        mock_certificate(authorities[3], 3, BTreeSet::from([leader_round_1.digest()]));
+
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(10);
+    let (tx_output, mut rx_output) = channel(10);
+    let mut consensus = Consensus {
+        committee: committee.clone(),
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs.clone(),
+    };
+    tokio::spawn(async move { while rx_primary.recv().await.is_some() {} });
+
+    let mut state = State::new(genesis_certs);
+    state.insert(leader_round_1.clone());
+    state.insert(support_round_2_a.clone());
+    state.insert(activation_round_3.clone());
+
+    let mut fast_pending = consensus
+        .fast_coin_pending_commit_check_for_round(3, &state)
+        .expect("round 3 should activate a fast-coin pending check");
+    assert_eq!(fast_pending.leader_round, 1);
+    assert_eq!(fast_pending.support_round, 2);
+
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 3, &mut fast_pending)
+        .await;
+    assert!(
+        !committed,
+        "one round-2 support certificate should not be enough to commit"
+    );
+
+    let regular_pending = consensus
+        .solid_pending_commit_check_for_round(4, &state)
+        .expect("round 4 should still prepare the regular pending check before fast coin succeeds");
+    assert_eq!(regular_pending.leader_round, 1);
+    assert_eq!(regular_pending.support_round, 3);
+
+    state.insert(support_round_2_b);
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 2, &mut fast_pending)
+        .await;
+    assert!(committed, "the second round-2 support certificate should let fast coin commit");
+
+    let committed_leader = rx_output.recv().await.unwrap();
+    assert_eq!(committed_leader.round(), 1);
+    assert_eq!(committed_leader.origin(), leader_author);
+
+    assert!(
+        consensus.solid_pending_commit_check_for_round(4, &state).is_none(),
+        "once fast coin commits the leader, the regular path should no longer activate"
+    );
 }

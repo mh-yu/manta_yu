@@ -226,6 +226,7 @@ class LogParser:
             ('Reference', 'reference'),
             ('Coverage', 'coverage'),
             ('Allow cross-step weak edges', 'allow_cross_step_weak_edges'),
+            ('Enable fast coin', 'enable_fast_coin'),
             ('Design tag', 'design_tag'),
         ):
             value = node_params.get(key)

@@ -135,11 +135,42 @@ impl State {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CommitCheckPath {
+    Solid,
+    FastCoin,
+}
+
+impl CommitCheckPath {
+    fn log_label(&self) -> &'static str {
+        match self {
+            Self::Solid => "solid",
+            Self::FastCoin => "fast_coin",
+        }
+    }
+
+    fn sort_key(&self) -> u8 {
+        match self {
+            Self::FastCoin => 0,
+            Self::Solid => 1,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct PendingCommitCheck {
+    path: CommitCheckPath,
     leader_round: Round,
     support_round: Round,
     seen_support_certificate_digests: HashSet<Digest>,
+}
+
+impl PendingCommitCheck {
+    fn matches(&self, other: &PendingCommitCheck) -> bool {
+        self.path == other.path
+            && self.leader_round == other.leader_round
+            && self.support_round == other.support_round
+    }
 }
 
 pub struct Consensus {
@@ -198,7 +229,7 @@ impl Consensus {
     async fn run(&mut self) {
         // The consensus state (everything else is immutable).
         let mut state = State::new(self.genesis.clone());
-        let mut pending_commit_check: Option<PendingCommitCheck> = None;
+        let mut pending_commit_checks: Vec<PendingCommitCheck> = Vec::new();
 
         // Listen to incoming certificates.
         while let Some(certificate) = self.rx_primary.recv().await {
@@ -212,43 +243,66 @@ impl Consensus {
             // Emit DAG visualization for extract_final_dag / extract_dag_out (full DAG per round).
             self.visualize_dag(&state, round);
 
-            let mut should_evaluate_pending = false;
-            if let Some(candidate) = self.pending_commit_check_for_round(round, &state) {
-                let replace_pending = pending_commit_check.as_ref().map_or(true, |pending| {
-                    pending.leader_round != candidate.leader_round
-                        || pending.support_round != candidate.support_round
-                });
-                if replace_pending {
-                    if let Some(pending) = pending_commit_check.as_ref() {
-                        debug!(
-                            "Retiring pending commit check leader_round={} support_round={} because new window leader_round={} support_round={} started at round {}",
-                            pending.leader_round,
-                            pending.support_round,
-                            candidate.leader_round,
-                            candidate.support_round,
-                            round
-                        );
+            let mut cleared = Vec::new();
+            pending_commit_checks.retain(|pending| {
+                let keep = pending.leader_round > state.last_committed_leader_round;
+                if !keep {
+                    cleared.push((pending.path, pending.leader_round, pending.support_round));
+                }
+                keep
+            });
+            for (path, leader_round, support_round) in cleared {
+                debug!(
+                    "Clearing pending commit check path={} leader_round={} support_round={} because it is already committed",
+                    path.log_label(),
+                    leader_round,
+                    support_round
+                );
+            }
+
+            let mut evaluate_pending_indices = Vec::new();
+            let candidates = self.pending_commit_checks_for_round(round, &state);
+            if let Some(newest_leader_round) = candidates.iter().map(|candidate| candidate.leader_round).max() {
+                let mut retired = Vec::new();
+                pending_commit_checks.retain(|pending| {
+                    let keep = pending.leader_round >= newest_leader_round;
+                    if !keep {
+                        retired.push((pending.path, pending.leader_round, pending.support_round));
                     }
+                    keep
+                });
+                for (path, leader_round, support_round) in retired {
                     debug!(
-                        "Activating pending commit check leader_round={} support_round={} at round {}",
-                        candidate.leader_round, candidate.support_round, round
+                        "Retiring pending commit check path={} leader_round={} support_round={} because newer leader window {} started at round {}",
+                        path.log_label(),
+                        leader_round,
+                        support_round,
+                        newest_leader_round,
+                        round
                     );
-                    pending_commit_check = Some(candidate);
-                    should_evaluate_pending = true;
                 }
             }
 
-            if let Some(pending) = pending_commit_check.as_ref() {
-                if pending.leader_round <= state.last_committed_leader_round {
-                    debug!(
-                        "Clearing pending commit check leader_round={} support_round={} because it is already committed",
-                        pending.leader_round, pending.support_round
-                    );
-                    pending_commit_check = None;
+            for candidate in candidates {
+                let already_pending = pending_commit_checks
+                    .iter()
+                    .any(|pending| pending.matches(&candidate));
+                if already_pending {
+                    continue;
                 }
+                debug!(
+                    "Activating pending commit check path={} leader_round={} support_round={} at round {}",
+                    candidate.path.log_label(),
+                    candidate.leader_round,
+                    candidate.support_round,
+                    round
+                );
+                pending_commit_checks.push(candidate);
+                evaluate_pending_indices.push(pending_commit_checks.len() - 1);
             }
 
-            if let Some(pending) = pending_commit_check.as_mut() {
+            for (index, pending) in pending_commit_checks.iter_mut().enumerate() {
+                let should_evaluate_pending = evaluate_pending_indices.contains(&index);
                 if !should_evaluate_pending
                     && round == pending.support_round
                     && !pending
@@ -256,19 +310,36 @@ impl Consensus {
                         .contains(&certificate_digest)
                 {
                     debug!(
-                        "Rechecking pending commit leader_round={} support_round={} due to late support certificate at round {}",
-                        pending.leader_round, pending.support_round, round
+                        "Rechecking pending commit path={} leader_round={} support_round={} due to late support certificate at round {}",
+                        pending.path.log_label(),
+                        pending.leader_round,
+                        pending.support_round,
+                        round
                     );
-                    should_evaluate_pending = true;
+                    evaluate_pending_indices.push(index);
                 }
+            }
 
-                if should_evaluate_pending {
-                    let committed = self
-                        .evaluate_pending_commit_check(&mut state, round, pending)
-                        .await;
-                    if committed || pending.leader_round <= state.last_committed_leader_round {
-                        pending_commit_check = None;
-                    }
+            evaluate_pending_indices.sort_unstable();
+            evaluate_pending_indices.dedup();
+            evaluate_pending_indices.sort_by_key(|index| {
+                let pending = &pending_commit_checks[*index];
+                (pending.leader_round, pending.path.sort_key(), pending.support_round)
+            });
+
+            for index in evaluate_pending_indices {
+                if index >= pending_commit_checks.len() {
+                    continue;
+                }
+                let committed = {
+                    let pending = &mut pending_commit_checks[index];
+                    self.evaluate_pending_commit_check(&mut state, round, pending)
+                        .await
+                };
+                if committed {
+                    pending_commit_checks
+                        .retain(|pending| pending.leader_round > state.last_committed_leader_round);
+                    break;
                 }
             }
         }
@@ -292,7 +363,29 @@ impl Consensus {
             .unwrap_or_default()
     }
 
-    fn pending_commit_check_for_round(
+    fn build_pending_commit_check(
+        &self,
+        path: CommitCheckPath,
+        leader_round: Round,
+        support_round: Round,
+        state: &State,
+    ) -> Option<PendingCommitCheck> {
+        if leader_round <= state.last_committed_leader_round {
+            return None;
+        }
+
+        Some(PendingCommitCheck {
+            path,
+            leader_round,
+            support_round,
+            seen_support_certificate_digests: Self::support_certificate_digests(
+                state,
+                support_round,
+            ),
+        })
+    }
+
+    fn solid_pending_commit_check_for_round(
         &self,
         round: Round,
         state: &State,
@@ -311,18 +404,53 @@ impl Consensus {
         if leader_round != 1 && !self.committee.is_solid_wave(leader_round) {
             return None;
         }
-        if leader_round <= state.last_committed_leader_round {
+        self.build_pending_commit_check(CommitCheckPath::Solid, leader_round, support_round, state)
+    }
+
+    fn fast_coin_pending_commit_check_for_round(
+        &self,
+        round: Round,
+        state: &State,
+    ) -> Option<PendingCommitCheck> {
+        if !self.committee.enable_fast_coin {
             return None;
         }
 
-        Some(PendingCommitCheck {
+        let step_length = self.committee.solid_step_length();
+        if step_length <= 1 || round <= step_length {
+            return None;
+        }
+        if !self.committee.is_solid_step(round) {
+            return None;
+        }
+
+        let support_round = round - 1;
+        let leader_round = round - step_length;
+        if leader_round != 1 && !self.committee.is_solid_wave(leader_round) {
+            return None;
+        }
+
+        self.build_pending_commit_check(
+            CommitCheckPath::FastCoin,
             leader_round,
             support_round,
-            seen_support_certificate_digests: Self::support_certificate_digests(
-                state,
-                support_round,
-            ),
-        })
+            state,
+        )
+    }
+
+    fn pending_commit_checks_for_round(
+        &self,
+        round: Round,
+        state: &State,
+    ) -> Vec<PendingCommitCheck> {
+        let mut candidates = Vec::new();
+        if let Some(candidate) = self.fast_coin_pending_commit_check_for_round(round, state) {
+            candidates.push(candidate);
+        }
+        if let Some(candidate) = self.solid_pending_commit_check_for_round(round, state) {
+            candidates.push(candidate);
+        }
+        candidates
     }
 
     async fn evaluate_pending_commit_check(
@@ -331,6 +459,7 @@ impl Consensus {
         trigger_round: Round,
         pending: &mut PendingCommitCheck,
     ) -> bool {
+        let path = pending.path;
         let leader_round = pending.leader_round;
         let support_round = pending.support_round;
 
@@ -338,8 +467,11 @@ impl Consensus {
             Some((digest, cert)) => (digest.clone(), cert.clone()),
             None => {
                 debug!(
-                    "No leader in DAG for leader_round {} (support_round={}, trigger_round={})",
-                    leader_round, support_round, trigger_round
+                    "No leader in DAG for path={} leader_round {} (support_round={}, trigger_round={})",
+                    path.log_label(),
+                    leader_round,
+                    support_round,
+                    trigger_round
                 );
                 pending.seen_support_certificate_digests =
                     Self::support_certificate_digests(state, support_round);
@@ -353,9 +485,10 @@ impl Consensus {
             let cert_pos = self.find_certificate_in_dag(state, &leader_digest);
 
             debug!(
-                "Commit validity check: trigger_round={}, leader_round={}, support_round={}. \
+                "Commit validity check: path={}, trigger_round={}, leader_round={}, support_round={}. \
 leader_header_id={:?} -> {:?} (node_id={}); \
 leader_digest(cert)= {:?} -> {:?} (node_id={})",
+                path.log_label(),
                 trigger_round,
                 leader_round,
                 support_round,
@@ -418,7 +551,8 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
             Self::support_certificate_digests(state, support_round);
         if stake < threshold {
             info!(
-                "DAG_COMMIT_CHECK path=solid leader_round={} leader_node={} support_round={} support_basis=solid_wave_vertices trigger_round={} stake={} threshold={} result=insufficient_stake support_set={:?}",
+                "DAG_COMMIT_CHECK path={} leader_round={} leader_node={} support_round={} support_basis=solid_wave_vertices trigger_round={} stake={} threshold={} result=insufficient_stake support_set={:?}",
+                path.log_label(),
                 leader_round,
                 leader_node,
                 support_round,
@@ -482,7 +616,8 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
             );
             if let Some(entries) = support_entries {
                 debug!(
-                    "DAG_COMMIT_SUPPORT leader_round={} support_round={} trigger_round={} detail={}",
+                    "DAG_COMMIT_SUPPORT path={} leader_round={} support_round={} trigger_round={} detail={}",
+                    path.log_label(),
                     leader_round,
                     support_round,
                     trigger_round,
@@ -493,7 +628,8 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
         }
 
         info!(
-            "DAG_COMMIT_CHECK path=solid leader_round={} leader_node={} support_round={} support_basis=solid_wave_vertices trigger_round={} stake={} threshold={} result=committed support_set={:?}",
+            "DAG_COMMIT_CHECK path={} leader_round={} leader_node={} support_round={} support_basis=solid_wave_vertices trigger_round={} stake={} threshold={} result=committed support_set={:?}",
+            path.log_label(),
             leader_round,
             leader_node,
             support_round,
@@ -504,7 +640,8 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
         );
         if let Some(entries) = support_entries {
             debug!(
-                "DAG_COMMIT_SUPPORT leader_round={} support_round={} trigger_round={} detail={}",
+                "DAG_COMMIT_SUPPORT path={} leader_round={} support_round={} trigger_round={} detail={}",
+                path.log_label(),
                 leader_round,
                 support_round,
                 trigger_round,

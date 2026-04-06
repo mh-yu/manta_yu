@@ -31,6 +31,10 @@ class LocalBench:
                 'allow_cross_step_weak_edges',
                 True,
             )
+            self.enable_fast_coin = node_parameters_dict.get(
+                'enable_fast_coin',
+                False,
+            )
         except ConfigError as e:
             raise BenchError('Invalid nodes or bench parameters', e)
 
@@ -116,6 +120,7 @@ class LocalBench:
                 self.reference,
                 self.coverage,
                 self.allow_cross_step_weak_edges,
+                self.enable_fast_coin,
             )
             committee.print(PathMaker.committee_file())
 
