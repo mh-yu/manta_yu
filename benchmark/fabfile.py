@@ -240,11 +240,11 @@ def cloudlab_install(ctx):
 def cloudlab_remote(
     ctx,
     debug=False,
-    sigma=2,
+    sigma=1,
     kappa=2,
     reference=4,
     coverage=7,
-    design_tag='manta',
+    design_tag='tusk-like',
 ):
     ''' Run benchmarks on CloudLab '''
     bench_params = {

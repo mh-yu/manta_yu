@@ -511,24 +511,24 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
   <title>DAG 总览</title>
   <style>
     :root {{
-      --bg: #07111f;
-      --panel: #0f172a;
-      --panel-2: #132238;
-      --text: #e2e8f0;
-      --muted: #94a3b8;
-      --leader: #f59e0b;
-      --committed: #22c55e;
-      --pending: #38bdf8;
-      --edge: #64748b;
-      --weak: #38bdf8;
-      --border: rgba(148, 163, 184, 0.18);
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --panel-2: #f3f5f9;
+      --text: #142033;
+      --muted: #52627a;
+      --leader: #b45309;
+      --committed: #15803d;
+      --pending: #0369a1;
+      --edge: #475569;
+      --weak: #0284c7;
+      --border: rgba(71, 85, 105, 0.18);
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
       background:
-        radial-gradient(circle at top left, rgba(56, 189, 248, 0.18), transparent 30%),
-        radial-gradient(circle at top right, rgba(245, 158, 11, 0.18), transparent 24%),
+        radial-gradient(circle at top left, rgba(2, 132, 199, 0.10), transparent 32%),
+        radial-gradient(circle at top right, rgba(180, 83, 9, 0.10), transparent 26%),
         var(--bg);
       color: var(--text);
       font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -539,11 +539,11 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
       gap: 20px;
     }}
     .panel {{
-      background: rgba(15, 23, 42, 0.88);
+      background: rgba(255, 255, 255, 0.94);
       border: 1px solid var(--border);
       border-radius: 18px;
       padding: 18px 20px;
-      box-shadow: 0 20px 40px rgba(2, 6, 23, 0.35);
+      box-shadow: 0 18px 35px rgba(15, 23, 42, 0.08);
     }}
     h1, h2, h3 {{
       margin: 0 0 10px;
@@ -586,26 +586,26 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
       gap: 6px;
       padding: 4px 10px;
       border-radius: 999px;
-      background: rgba(148, 163, 184, 0.12);
-      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(71, 85, 105, 0.08);
+      border: 1px solid rgba(71, 85, 105, 0.18);
       margin-right: 8px;
       margin-bottom: 8px;
       white-space: nowrap;
     }}
     .badge-leader {{
-      border-color: rgba(245, 158, 11, 0.45);
-      background: rgba(245, 158, 11, 0.12);
-      color: #fde68a;
+      border-color: rgba(180, 83, 9, 0.35);
+      background: rgba(245, 158, 11, 0.14);
+      color: #92400e;
     }}
     .badge-ok {{
-      border-color: rgba(34, 197, 94, 0.45);
-      background: rgba(34, 197, 94, 0.12);
-      color: #bbf7d0;
+      border-color: rgba(21, 128, 61, 0.35);
+      background: rgba(34, 197, 94, 0.14);
+      color: #166534;
     }}
     .badge-warn {{
-      border-color: rgba(56, 189, 248, 0.45);
-      background: rgba(56, 189, 248, 0.12);
-      color: #bae6fd;
+      border-color: rgba(3, 105, 161, 0.35);
+      background: rgba(14, 165, 233, 0.14);
+      color: #075985;
     }}
     .svg-shell {{
       overflow-x: auto;
@@ -616,46 +616,46 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
       display: block;
     }}
     .round-band {{
-      fill: rgba(15, 23, 42, 0.25);
-      stroke: rgba(148, 163, 184, 0.12);
+      fill: rgba(226, 232, 240, 0.45);
+      stroke: rgba(148, 163, 184, 0.28);
     }}
     .band-leader {{
-      fill: rgba(245, 158, 11, 0.08);
-      stroke: rgba(245, 158, 11, 0.2);
+      fill: rgba(245, 158, 11, 0.10);
+      stroke: rgba(180, 83, 9, 0.22);
     }}
     .band-committed {{
-      fill: rgba(34, 197, 94, 0.08);
-      stroke: rgba(34, 197, 94, 0.18);
+      fill: rgba(34, 197, 94, 0.10);
+      stroke: rgba(21, 128, 61, 0.22);
     }}
     .band-pending {{
-      fill: rgba(56, 189, 248, 0.08);
-      stroke: rgba(56, 189, 248, 0.18);
+      fill: rgba(14, 165, 233, 0.10);
+      stroke: rgba(3, 105, 161, 0.22);
     }}
     .edge {{
       fill: none;
-      stroke-width: 1.4;
-      opacity: 0.65;
+      stroke-width: 1.8;
+      opacity: 0.9;
     }}
     .edge-strong {{
       stroke: var(--edge);
     }}
     .edge-weak {{
       stroke: var(--weak);
-      stroke-dasharray: 5 4;
+      stroke-dasharray: 6 4;
     }}
     .node {{
-      fill: #1e293b;
-      stroke: #64748b;
-      stroke-width: 1.4;
+      fill: #ffffff;
+      stroke: #475569;
+      stroke-width: 1.8;
     }}
     .node-committed {{
-      fill: rgba(34, 197, 94, 0.25);
-      stroke: rgba(34, 197, 94, 0.9);
+      fill: rgba(34, 197, 94, 0.16);
+      stroke: rgba(21, 128, 61, 0.95);
       stroke-width: 2.2;
     }}
     .node-leader {{
-      fill: rgba(245, 158, 11, 0.28);
-      stroke: rgba(245, 158, 11, 0.95);
+      fill: rgba(245, 158, 11, 0.20);
+      stroke: rgba(180, 83, 9, 0.95);
       stroke-width: 2.6;
     }}
     .node-label {{
@@ -677,10 +677,10 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
       fill: var(--muted);
     }}
     .leader-sub {{
-      fill: #fde68a;
+      fill: #92400e;
     }}
     .support-sub {{
-      fill: #bbf7d0;
+      fill: #166534;
     }}
     .row-label {{
       fill: var(--muted);
