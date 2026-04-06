@@ -18,6 +18,7 @@ COMMIT_CHECK_RE = re.compile(
     r"leader_node=(?P<leader_node>\d+)\s+"
     r"support_round=(?P<support_round>\d+)\s+"
     r"support_basis=(?P<support_basis>\S+)\s+"
+    r"(?:trigger_round=(?P<trigger_round>\d+)\s+)?"
     r"stake=(?P<stake>\d+)\s+"
     r"threshold=(?P<threshold>\d+)\s+"
     r"result=(?P<result>\S+)\s+"
@@ -168,6 +169,10 @@ def parse_consensus_events(log_path: str) -> Dict[str, Any]:
             if commit_match:
                 leader_round = int(commit_match.group("leader_round"))
                 support_round = int(commit_match.group("support_round"))
+                trigger_round_raw = commit_match.group("trigger_round")
+                trigger_round = (
+                    int(trigger_round_raw) if trigger_round_raw is not None else support_round
+                )
                 stake = int(commit_match.group("stake"))
                 threshold = int(commit_match.group("threshold"))
                 result = commit_match.group("result")
@@ -175,6 +180,7 @@ def parse_consensus_events(log_path: str) -> Dict[str, Any]:
                 attempt_key = (
                     leader_round,
                     support_round,
+                    trigger_round,
                     stake,
                     threshold,
                     result,
@@ -190,6 +196,7 @@ def parse_consensus_events(log_path: str) -> Dict[str, Any]:
                         "leader_round": leader_round,
                         "leader_node": int(commit_match.group("leader_node")),
                         "support_round": support_round,
+                        "trigger_round": trigger_round,
                         "support_basis": commit_match.group("support_basis"),
                         "path": commit_match.group("path"),
                         "threshold": threshold,
@@ -204,11 +211,13 @@ def parse_consensus_events(log_path: str) -> Dict[str, Any]:
                         "stake": stake,
                         "threshold": threshold,
                         "result": result,
+                        "trigger_round": trigger_round,
                         "support_set": support_set,
                     }
                 )
                 event["leader_node"] = int(commit_match.group("leader_node"))
                 event["support_round"] = support_round
+                event["trigger_round"] = trigger_round
                 event["support_basis"] = commit_match.group("support_basis")
                 event["path"] = commit_match.group("path")
                 event["threshold"] = threshold
@@ -304,6 +313,7 @@ def export_dag_event_csv(log_files: List[str], output_file: str) -> Optional[str
                 "leader_round",
                 "leader_node",
                 "support_round",
+                "trigger_round",
                 "support_basis",
                 "attempt_count",
                 "final_result",
@@ -320,6 +330,7 @@ def export_dag_event_csv(log_files: List[str], output_file: str) -> Optional[str
                     "leader_round": event["leader_round"],
                     "leader_node": event["leader_node"],
                     "support_round": event["support_round"],
+                    "trigger_round": event.get("trigger_round", event["support_round"]),
                     "support_basis": event["support_basis"],
                     "attempt_count": event["attempt_count"],
                     "final_result": event["final_result"],
@@ -354,7 +365,7 @@ def _support_badges(events: List[Dict[str, Any]]) -> str:
         css = "badge-ok" if event["final_result"] == "committed" else "badge-warn"
         result_text = "已提交" if event["final_result"] == "committed" else event["final_result"]
         badges.append(
-            f'<span class="badge {css}">检查 r{event["leader_round"]}，support 轮 r{event["support_round"]}: '
+            f'<span class="badge {css}">检查 r{event["leader_round"]}，support 轮 r{event["support_round"]}，触发轮 r{event.get("trigger_round", event["support_round"])}: '
             f'{html.escape(result_text)}</span>'
         )
     return "".join(badges)
@@ -696,7 +707,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
   <main>
     <section class="panel">
       <h1>带提交标注的 DAG 总览</h1>
-      <p>当前语义：当下一轮的第一个顶点到达时，开始对上一轮的 support round 做提交检查。</p>
+      <p>当前语义：第一次在下一轮首个顶点到达时激活检查；之后只要 support round 有晚到证书，就对同一组 leader/support 重新检查，直到成功提交或进入下一次检查窗口。</p>
       <p>来源日志: {html.escape(summary.get("selected_log") or "-")}</p>
       <div class="metrics">
         <div class="metric"><div class="label">Leader 轮数</div><div class="value">{summary["leader_rounds"]}</div></div>
@@ -707,7 +718,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
       </div>
       <div class="legend" style="margin-top:14px;">
         <span class="badge badge-leader">金色节点 = 该 leader round 选中的 leader</span>
-        <span class="badge badge-ok">绿色列 = 本轮开始时触发了对上一轮 support round 的检查，并成功提交</span>
+        <span class="badge badge-ok">绿色列 = 本轮触发过检查；第一次由下一轮首个顶点启动，后续可被晚到的 support round 证书再次触发，并最终成功提交</span>
         <span class="badge">绿色描边 = 出现在 DAG_COMMITTED 中的顶点</span>
         <span class="badge">蓝色虚线 = weak parent 边</span>
       </div>

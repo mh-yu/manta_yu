@@ -13,6 +13,7 @@ config = { path = "../config" }
 primary = { path = "../primary" }
 
 [dev-dependencies]
+env_logger = "0.11.10"
 rand = "0.7.3"
 
 [features]
