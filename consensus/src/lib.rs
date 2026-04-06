@@ -203,20 +203,23 @@ impl Consensus {
             // Emit DAG visualization for extract_final_dag / extract_dag_out (full DAG per round).
             self.visualize_dag(&state, round);
 
-            // Commit at overlapping solid-step boundaries. When a solid step [l, r]
-            // closes, we validate the leader elected at the step's first round `l`.
-            // Only solid-wave boundary rounds can be leaders, so with sigma=2 and
-            // wave_length=4 we commit on rounds 3, 7, 11, ... and elect leaders from
-            // rounds 1, 5, 9, ...
+            // Start commit checks when the next round begins. In other words, when
+            // we first see a certificate for round s+1, we treat support round `s`
+            // as "closed" and validate the leader from `s - step_length`.
+            //
+            // With sigma=2 and wave_length=4:
+            // - support rounds are 3, 7, 11, ...
+            // - leader rounds are 1, 5, 9, ...
+            // - checks start on incoming rounds 4, 8, 12, ...
             let step_length = self.committee.solid_step_length();
-            if !self.committee.is_solid_step(round) {
+            if round <= step_length + 1 {
                 continue;
             }
-            if round <= step_length {
+            let support_round = round - 1;
+            if !self.committee.is_solid_step(support_round) {
                 continue;
             }
-            let leader_round = round - step_length;
-            let support_round = round;
+            let leader_round = support_round - step_length;
             if leader_round != 1 && !self.committee.is_solid_wave(leader_round) {
                 continue;
             }

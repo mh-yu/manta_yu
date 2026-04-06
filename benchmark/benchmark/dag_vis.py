@@ -354,7 +354,7 @@ def _support_badges(events: List[Dict[str, Any]]) -> str:
         css = "badge-ok" if event["final_result"] == "committed" else "badge-warn"
         result_text = "已提交" if event["final_result"] == "committed" else event["final_result"]
         badges.append(
-            f'<span class="badge {css}">检查 r{event["leader_round"]}，触发轮 r{event["support_round"]}: '
+            f'<span class="badge {css}">检查 r{event["leader_round"]}，support 轮 r{event["support_round"]}: '
             f'{html.escape(result_text)}</span>'
         )
     return "".join(badges)
@@ -401,7 +401,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
             )
         if support_events:
             summary_parts = [
-                f'r{event["leader_round"]}->{("已提交" if event["final_result"] == "committed" else event["final_result"])}'
+                f'r{event["leader_round"]}/s{event["support_round"]}->{("已提交" if event["final_result"] == "committed" else event["final_result"])}'
                 for event in support_events
             ]
             header_lines.append(
@@ -696,6 +696,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
   <main>
     <section class="panel">
       <h1>带提交标注的 DAG 总览</h1>
+      <p>当前语义：当下一轮的第一个顶点到达时，开始对上一轮的 support round 做提交检查。</p>
       <p>来源日志: {html.escape(summary.get("selected_log") or "-")}</p>
       <div class="metrics">
         <div class="metric"><div class="label">Leader 轮数</div><div class="value">{summary["leader_rounds"]}</div></div>
@@ -706,7 +707,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
       </div>
       <div class="legend" style="margin-top:14px;">
         <span class="badge badge-leader">金色节点 = 该 leader round 选中的 leader</span>
-        <span class="badge badge-ok">绿色列 = 在该 support round 成功提交</span>
+        <span class="badge badge-ok">绿色列 = 本轮开始时触发了对上一轮 support round 的检查，并成功提交</span>
         <span class="badge">绿色描边 = 出现在 DAG_COMMITTED 中的顶点</span>
         <span class="badge">蓝色虚线 = weak parent 边</span>
       </div>
