@@ -747,7 +747,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
   <main>
     <section class="panel">
       <h1>带提交标注的 DAG 总览</h1>
-      <p>当前语义：第一次在下一轮首个顶点到达时激活检查；之后只要 support round 有晚到证书，就对同一组 leader/support 重新检查，直到成功提交或进入下一次检查窗口。若启用 fast coin，则同一 leader 还会多出一条更早启动的检查路径，任一路径先满足阈值即可提交。</p>
+      <p>当前语义：regular 路径在下一轮首个顶点到达时激活检查；之后只要 support round 有晚到证书，就对同一组 leader/support 重新检查，直到成功提交或进入下一次检查窗口。若启用 fast coin，则同一 leader 还会多出一条更早启动的检查路径：support round 一旦累计到 f+1 个证书，就立即开始检查，任一路径先满足阈值即可提交。</p>
       <p>来源日志: {html.escape(summary.get("selected_log") or "-")}</p>
       <p>图中仅展示前 {rendered_round_count} 轮；上方统计指标仍基于全量 DAG 轮次与提交事件计算。</p>
       <div class="metrics">
@@ -759,7 +759,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
       </div>
       <div class="legend" style="margin-top:14px;">
         <span class="badge badge-leader">金色节点 = 该 leader round 选中的 leader</span>
-        <span class="badge badge-ok">绿色列 = 本轮触发过检查；第一次由下一轮首个顶点启动，后续可被晚到的 support round 证书再次触发，并最终成功提交</span>
+        <span class="badge badge-ok">绿色列 = 本轮触发过检查；regular 路径由下一轮首个顶点启动，fast coin 路径由 support round 累计到 f+1 个证书启动，之后都可被晚到的 support round 证书再次触发并最终成功提交</span>
         <span class="badge">绿色描边 = 出现在 DAG_COMMITTED 中的顶点</span>
         <span class="badge">蓝色虚线 = weak parent 边</span>
       </div>

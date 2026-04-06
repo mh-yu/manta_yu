@@ -508,40 +508,33 @@ async fn fast_coin_commits_before_regular_path() {
     let mut state = State::new(genesis_certs);
     state.insert(leader_round_1.clone());
     state.insert(support_round_2_a.clone());
-    state.insert(activation_round_3.clone());
 
+    assert!(
+        consensus.fast_coin_pending_commit_check_for_round(2, &state).is_none(),
+        "one round-2 support certificate should not activate fast coin yet"
+    );
+
+    state.insert(support_round_2_b);
     let mut fast_pending = consensus
-        .fast_coin_pending_commit_check_for_round(3, &state)
-        .expect("round 3 should activate a fast-coin pending check");
+        .fast_coin_pending_commit_check_for_round(2, &state)
+        .expect("round 2 should activate a fast-coin pending check once f+1 supports arrive");
     assert_eq!(fast_pending.leader_round, 1);
     assert_eq!(fast_pending.support_round, 2);
 
     let committed = consensus
-        .evaluate_pending_commit_check(&mut state, 3, &mut fast_pending)
-        .await;
-    assert!(
-        !committed,
-        "one round-2 support certificate should not be enough to commit"
-    );
-
-    let regular_pending = consensus
-        .solid_pending_commit_check_for_round(4, &state)
-        .expect("round 4 should still prepare the regular pending check before fast coin succeeds");
-    assert_eq!(regular_pending.leader_round, 1);
-    assert_eq!(regular_pending.support_round, 3);
-
-    state.insert(support_round_2_b);
-    let committed = consensus
         .evaluate_pending_commit_check(&mut state, 2, &mut fast_pending)
         .await;
-    assert!(committed, "the second round-2 support certificate should let fast coin commit");
+    assert!(committed, "f+1 round-2 support certificates should let fast coin commit immediately");
 
     let committed_leader = rx_output.recv().await.unwrap();
     assert_eq!(committed_leader.round(), 1);
     assert_eq!(committed_leader.origin(), leader_author);
 
+    state.insert(activation_round_3.clone());
+
+    let regular_pending = consensus.solid_pending_commit_check_for_round(4, &state);
     assert!(
-        consensus.solid_pending_commit_check_for_round(4, &state).is_none(),
+        regular_pending.is_none(),
         "once fast coin commits the leader, the regular path should no longer activate"
     );
 }
