@@ -396,6 +396,14 @@ def _path_label(path: str) -> str:
     return path
 
 
+def _support_basis_label(basis: str) -> str:
+    if basis == "solid_step_vertices_or_parent_path":
+        return "solid-step / parent-path"
+    if basis == "solid_wave_vertices":
+        return "solid-wave"
+    return basis
+
+
 def _support_badges(events: List[Dict[str, Any]]) -> str:
     badges = []
     for event in events:
@@ -403,7 +411,7 @@ def _support_badges(events: List[Dict[str, Any]]) -> str:
         result_text = "已提交" if event["final_result"] == "committed" else event["final_result"]
         badges.append(
             f'<span class="badge {css}">{html.escape(_path_label(event["path"]))} 检查 r{event["leader_round"]}，support 轮 r{event["support_round"]}，触发轮 r{event.get("trigger_round", event["support_round"])}: '
-            f'{html.escape(result_text)}</span>'
+            f'{html.escape(result_text)}，basis={html.escape(_support_basis_label(event["support_basis"]))}</span>'
         )
     return "".join(badges)
 
@@ -747,7 +755,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
   <main>
     <section class="panel">
       <h1>带提交标注的 DAG 总览</h1>
-      <p>当前语义：regular 路径在下一轮首个顶点到达时激活检查；之后只要 support round 有晚到证书，就对同一组 leader/support 重新检查，直到成功提交或进入下一次检查窗口。若启用 fast coin，则同一 leader 还会多出一条更早启动的检查路径：support round 一旦累计到 f+1 个证书，就立即开始检查，任一路径先满足阈值即可提交。</p>
+      <p>当前语义：regular 路径在下一轮首个顶点到达时激活检查；之后只要 support round 有晚到证书，就对同一组 leader/support 重新检查，直到成功提交或进入下一次检查窗口。若启用 fast coin，则同一 leader 还会多出一条更早启动的检查路径：在下一轮首个顶点到达时，对前一轮 support round 发起检查；其支持依据优先看 solid-step 摘要，缺失时再退回 parent path。</p>
       <p>来源日志: {html.escape(summary.get("selected_log") or "-")}</p>
       <p>图中仅展示前 {rendered_round_count} 轮；上方统计指标仍基于全量 DAG 轮次与提交事件计算。</p>
       <div class="metrics">
@@ -759,7 +767,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
       </div>
       <div class="legend" style="margin-top:14px;">
         <span class="badge badge-leader">金色节点 = 该 leader round 选中的 leader</span>
-        <span class="badge badge-ok">绿色列 = 本轮触发过检查；regular 路径由下一轮首个顶点启动，fast coin 路径由 support round 累计到 f+1 个证书启动，之后都可被晚到的 support round 证书再次触发并最终成功提交</span>
+        <span class="badge badge-ok">绿色列 = 本轮触发过检查；regular 路径由下一轮首个顶点启动，fast coin 路径也由下一轮首个顶点启动，但优先使用更早的 solid-step / parent-path 支持依据；之后都可被晚到的 support round 证书再次触发并最终成功提交</span>
         <span class="badge">绿色描边 = 出现在 DAG_COMMITTED 中的顶点</span>
         <span class="badge">蓝色虚线 = weak parent 边</span>
       </div>

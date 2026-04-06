@@ -80,6 +80,25 @@ fn mock_certificate_with_solid_wave(
     (certificate.digest(), certificate)
 }
 
+fn mock_certificate_with_solid_step(
+    origin: PublicKey,
+    round: Round,
+    parents: BTreeSet<Digest>,
+    solid_step_vertices: HashSet<Digest>,
+) -> (Digest, Certificate) {
+    let certificate = Certificate {
+        header: Header {
+            author: origin,
+            round,
+            parents,
+            solid_step_vertices,
+            ..Header::default()
+        },
+        ..Certificate::default()
+    };
+    (certificate.digest(), certificate)
+}
+
 // Creates one certificate per authority starting and finishing at the specified rounds (inclusive).
 // Outputs a VecDeque of certificates (the certificate with higher round is on the front) and a set
 // of digests to be used as parents for the certificates of the next round.
@@ -539,13 +558,13 @@ async fn fast_coin_commits_before_regular_path() {
     let mut support_vertices = HashSet::new();
     support_vertices.insert(leader_header_id.clone());
 
-    let (_, support_round_2_a) = mock_certificate_with_solid_wave(
+    let (_, support_round_2_a) = mock_certificate_with_solid_step(
         supporter_a,
         2,
         BTreeSet::new(),
         support_vertices.clone(),
     );
-    let (_, support_round_2_b) = mock_certificate_with_solid_wave(
+    let (_, support_round_2_b) = mock_certificate_with_solid_step(
         supporter_b,
         2,
         BTreeSet::new(),
@@ -605,4 +624,76 @@ async fn fast_coin_commits_before_regular_path() {
         regular_pending.is_none(),
         "once fast coin commits the leader, the regular path should no longer activate"
     );
+}
+
+#[tokio::test]
+async fn fast_coin_commits_via_parent_path_when_step_summary_missing() {
+    let committee = Committee {
+        enable_fast_coin: true,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let genesis_parents = genesis_certs
+        .iter()
+        .map(|certificate| certificate.digest())
+        .collect::<BTreeSet<_>>();
+
+    let leader_author = authorities[0];
+    let supporter_a = authorities[1];
+    let supporter_b = authorities[2];
+    let leader_digest;
+
+    let (_, leader_round_1) = mock_certificate(leader_author, 1, genesis_parents.clone());
+    leader_digest = leader_round_1.digest();
+    let support_parents = BTreeSet::from([leader_digest.clone()]);
+
+    let (_, support_round_2_a) =
+        mock_certificate(supporter_a, 2, support_parents.clone());
+    let (_, support_round_2_b) =
+        mock_certificate(supporter_b, 2, support_parents.clone());
+    let (_, activation_round_3) =
+        mock_certificate(authorities[3], 3, BTreeSet::from([leader_digest.clone()]));
+
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(10);
+    let (tx_output, mut rx_output) = channel(10);
+    let mut consensus = Consensus {
+        committee: committee.clone(),
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs.clone(),
+    };
+    tokio::spawn(async move { while rx_primary.recv().await.is_some() {} });
+
+    let mut state = State::new(genesis_certs);
+    state.insert(leader_round_1.clone());
+    state.insert(support_round_2_a.clone());
+    state.insert(support_round_2_b.clone());
+    state.insert(activation_round_3.clone());
+
+    let mut fast_pending = consensus
+        .fast_coin_pending_commit_check_for_round(3, &state)
+        .expect("round 3 should still activate fast coin");
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 3, &mut fast_pending)
+        .await;
+    assert!(
+        committed,
+        "fast coin should fall back to the parent path when the solid-step summary misses the leader"
+    );
+
+    let committed_leader = rx_output.recv().await.unwrap();
+    assert_eq!(committed_leader.round(), 1);
+    assert_eq!(committed_leader.origin(), leader_author);
 }

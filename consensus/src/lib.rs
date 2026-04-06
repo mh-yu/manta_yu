@@ -149,6 +149,13 @@ impl CommitCheckPath {
         }
     }
 
+    fn support_basis_label(&self) -> &'static str {
+        match self {
+            Self::Solid => "solid_wave_vertices",
+            Self::FastCoin => "solid_step_vertices_or_parent_path",
+        }
+    }
+
     fn sort_key(&self) -> u8 {
         match self {
             Self::FastCoin => 0,
@@ -456,6 +463,26 @@ impl Consensus {
         candidates
     }
 
+    fn certificate_supports_leader(
+        &self,
+        path: CommitCheckPath,
+        certificate: &Certificate,
+        leader_header_id: &Digest,
+        leader_digest: &Digest,
+        leader: &Certificate,
+        state: &State,
+    ) -> (bool, bool, bool) {
+        let summary_vertices = match path {
+            CommitCheckPath::Solid => &certificate.header.solid_wave_vertices,
+            CommitCheckPath::FastCoin => &certificate.header.solid_step_vertices,
+        };
+        let summary_support =
+            summary_vertices.contains(leader_header_id) || summary_vertices.contains(leader_digest);
+        let parent_path_support =
+            matches!(path, CommitCheckPath::FastCoin) && self.linked(certificate, leader, state);
+        (summary_support || parent_path_support, summary_support, parent_path_support)
+    }
+
     async fn evaluate_pending_commit_check(
         &mut self,
         state: &mut State,
@@ -521,9 +548,15 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
         let mut stake = 0;
         if let Some(support_round_map) = support_round_map {
             for (_, certificate) in support_round_map.values() {
-                let vertices = &certificate.header.solid_wave_vertices;
-                let supports =
-                    vertices.contains(&leader_header_id) || vertices.contains(&leader_digest);
+                let (supports, summary_support, parent_path_support) = self
+                    .certificate_supports_leader(
+                        path,
+                        certificate,
+                        &leader_header_id,
+                        &leader_digest,
+                        &leader,
+                        state,
+                    );
                 let node_id = self.author_to_node_id(certificate.origin());
 
                 if supports {
@@ -532,17 +565,30 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
                 }
 
                 if let Some(entries) = support_entries.as_mut() {
-                    entries.push(format!(
-                        "[{},{}]:support={} solid=[{}] merged=[{}]",
-                        certificate.round(),
-                        node_id,
-                        supports,
-                        self.render_digest_set(state, &certificate.header.solid_wave_vertices),
-                        self.render_digest_set(
-                            state,
-                            &certificate.header.solid_wave_vertices_merged
+                    let detail = match path {
+                        CommitCheckPath::Solid => format!(
+                            "[{},{}]:support={} wave=[{}] merged=[{}]",
+                            certificate.round(),
+                            node_id,
+                            supports,
+                            self.render_digest_set(state, &certificate.header.solid_wave_vertices),
+                            self.render_digest_set(
+                                state,
+                                &certificate.header.solid_wave_vertices_merged
+                            ),
                         ),
-                    ));
+                        CommitCheckPath::FastCoin => format!(
+                            "[{},{}]:support={} step_hit={} parent_path={} step=[{}] wave=[{}]",
+                            certificate.round(),
+                            node_id,
+                            supports,
+                            summary_support,
+                            parent_path_support,
+                            self.render_digest_set(state, &certificate.header.solid_step_vertices),
+                            self.render_digest_set(state, &certificate.header.solid_wave_vertices),
+                        ),
+                    };
+                    entries.push(detail);
                 }
             }
         }
@@ -554,11 +600,12 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
             Self::support_certificate_digests(state, support_round);
         if stake < threshold {
             info!(
-                "DAG_COMMIT_CHECK path={} leader_round={} leader_node={} support_round={} support_basis=solid_wave_vertices trigger_round={} stake={} threshold={} result=insufficient_stake support_set={:?}",
+                "DAG_COMMIT_CHECK path={} leader_round={} leader_node={} support_round={} support_basis={} trigger_round={} stake={} threshold={} result=insufficient_stake support_set={:?}",
                 path.log_label(),
                 leader_round,
                 leader_node,
                 support_round,
+                path.support_basis_label(),
                 trigger_round,
                 stake,
                 threshold,
@@ -578,11 +625,14 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
                         let origin = cert.origin();
                         let node_id = self.author_to_node_id(origin);
 
-                        let base = &cert.header.solid_wave_vertices;
-                        let vertices = base;
-
+                        let vertices = match path {
+                            CommitCheckPath::Solid => &cert.header.solid_wave_vertices,
+                            CommitCheckPath::FastCoin => &cert.header.solid_step_vertices,
+                        };
                         let contains_leader_header = vertices.contains(&leader_header_id);
                         let contains_leader_digest = vertices.contains(&leader_digest);
+                        let parent_path_support =
+                            matches!(path, CommitCheckPath::FastCoin) && self.linked(cert, &leader, state);
 
                         let mut resolved: Vec<String> = Vec::with_capacity(vertices.len());
                         for d in vertices.iter() {
@@ -596,13 +646,15 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
                         resolved.sort();
 
                         debug!(
-                            "support_round cert: node={} cert_round={} cert_digest={:?} base_len={} contains(leader_header_id)={} contains(leader_digest)={} vertices={}",
+                            "support_round cert: node={} cert_round={} cert_digest={:?} basis={} base_len={} contains(leader_header_id)={} contains(leader_digest)={} parent_path={} vertices={}",
                             node_id,
                             cert.round(),
                             cert_digest,
-                            base.len(),
+                            path.support_basis_label(),
+                            vertices.len(),
                             contains_leader_header,
                             contains_leader_digest,
+                            parent_path_support,
                             resolved.join(", ")
                         );
                     }
@@ -631,11 +683,12 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
         }
 
         info!(
-            "DAG_COMMIT_CHECK path={} leader_round={} leader_node={} support_round={} support_basis=solid_wave_vertices trigger_round={} stake={} threshold={} result=committed support_set={:?}",
+            "DAG_COMMIT_CHECK path={} leader_round={} leader_node={} support_round={} support_basis={} trigger_round={} stake={} threshold={} result=committed support_set={:?}",
             path.log_label(),
             leader_round,
             leader_node,
             support_round,
+            path.support_basis_label(),
             trigger_round,
             stake,
             threshold,
