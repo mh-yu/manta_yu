@@ -35,6 +35,10 @@ class LocalBench:
                 'enable_fast_coin',
                 False,
             )
+            self.enable_commit_recheck = node_parameters_dict.get(
+                'enable_commit_recheck',
+                True,
+            )
         except ConfigError as e:
             raise BenchError('Invalid nodes or bench parameters', e)
 
@@ -121,6 +125,7 @@ class LocalBench:
                 self.coverage,
                 self.allow_cross_step_weak_edges,
                 self.enable_fast_coin,
+                self.enable_commit_recheck,
             )
             committee.print(PathMaker.committee_file())
 

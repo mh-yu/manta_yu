@@ -43,7 +43,8 @@ class Committee:
     '''
 
     def __init__(self, addresses, base_port, sigma, kappa, reference, coverage,
-                 allow_cross_step_weak_edges=True, enable_fast_coin=False):
+                 allow_cross_step_weak_edges=True, enable_fast_coin=False,
+                 enable_commit_recheck=True):
         ''' The `addresses` field looks as follows:
             { 
                 "name": ["host", "host", ...],
@@ -70,6 +71,7 @@ class Committee:
             'coverage': coverage,
             'allow_cross_step_weak_edges': allow_cross_step_weak_edges,
             'enable_fast_coin': enable_fast_coin,
+            'enable_commit_recheck': enable_commit_recheck,
         }
         for name, hosts in addresses.items():
             host = hosts.pop(0)
@@ -162,7 +164,8 @@ class Committee:
 
 class LocalCommittee(Committee):
     def __init__(self, names, port, workers, sigma, kappa, reference, coverage,
-                 allow_cross_step_weak_edges=True, enable_fast_coin=False):
+                 allow_cross_step_weak_edges=True, enable_fast_coin=False,
+                 enable_commit_recheck=True):
         assert isinstance(names, list)
         assert all(isinstance(x, str) for x in names)
         assert isinstance(port, int)
@@ -177,6 +180,7 @@ class LocalCommittee(Committee):
             coverage,
             allow_cross_step_weak_edges,
             enable_fast_coin,
+            enable_commit_recheck,
         )
 
 

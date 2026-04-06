@@ -39,6 +39,7 @@ pub fn mock_committee() -> Committee {
         coverage: 3,
         allow_cross_step_weak_edges: true,
         enable_fast_coin: false,
+        enable_commit_recheck: true,
     }
 }
 
@@ -444,6 +445,69 @@ async fn late_support_certificate_rechecks_pending_commit() {
     let committed_leader = rx_output.recv().await.unwrap();
     assert_eq!(committed_leader.round(), 1);
     assert_eq!(committed_leader.origin(), leader_author);
+}
+
+#[tokio::test]
+async fn late_support_certificate_does_not_recheck_when_disabled() {
+    let committee = Committee {
+        enable_commit_recheck: false,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let genesis = Certificate::genesis(&committee);
+    let genesis_parents = genesis
+        .iter()
+        .map(|certificate| certificate.digest())
+        .collect::<BTreeSet<_>>();
+
+    let leader_author = authorities[0];
+    let supporter_a = authorities[1];
+    let supporter_b = authorities[2];
+
+    let (_, leader_round_1) = mock_certificate(leader_author, 1, genesis_parents.clone());
+    let leader_header_id = leader_round_1.header.id.clone();
+
+    let mut support_vertices = HashSet::new();
+    support_vertices.insert(leader_header_id);
+
+    let (_, support_round_3_a) = mock_certificate_with_solid_wave(
+        supporter_a,
+        3,
+        BTreeSet::new(),
+        support_vertices.clone(),
+    );
+    let (_, activation_round_4) =
+        mock_certificate(authorities[3], 4, BTreeSet::from([leader_round_1.digest()]));
+    let (_, support_round_3_b) = mock_certificate_with_solid_wave(
+        supporter_b,
+        3,
+        BTreeSet::new(),
+        support_vertices,
+    );
+
+    let (tx_waiter, rx_waiter) = channel(10);
+    let (tx_primary, mut rx_primary) = channel(10);
+    let (tx_output, mut rx_output) = channel(10);
+    Consensus::spawn(
+        committee,
+        /* gc_depth */ 50,
+        rx_waiter,
+        tx_primary,
+        tx_output,
+    );
+    tokio::spawn(async move { while rx_primary.recv().await.is_some() {} });
+
+    tx_waiter.send(leader_round_1).await.unwrap();
+    tx_waiter.send(support_round_3_a).await.unwrap();
+    tx_waiter.send(activation_round_4).await.unwrap();
+    tx_waiter.send(support_round_3_b).await.unwrap();
+
+    let no_commit = tokio::time::timeout(std::time::Duration::from_millis(200), rx_output.recv())
+        .await;
+    assert!(
+        no_commit.is_err(),
+        "late support should not trigger a second commit check when recheck is disabled"
+    );
 }
 
 #[tokio::test]

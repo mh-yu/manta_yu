@@ -181,6 +181,13 @@ Examples:
                        action='store_false',
                        help='Disable the fast-coin commit path')
     parser.set_defaults(enable_fast_coin=False)
+    parser.add_argument('--commit-recheck', dest='enable_commit_recheck',
+                       action='store_true',
+                       help='Enable repeated pending commit checks when late support certificates arrive')
+    parser.add_argument('--no-commit-recheck', dest='enable_commit_recheck',
+                       action='store_false',
+                       help='Disable repeated pending commit checks for late support certificates')
+    parser.set_defaults(enable_commit_recheck=True)
     parser.add_argument('--design-tag', default='manta',
                        help='Design tag written to summary and run directory name (default: manta)')
     
@@ -211,6 +218,7 @@ Examples:
                 'coverage': args.coverage,
                 'allow_cross_step_weak_edges': args.allow_cross_step_weak_edges,
                 'enable_fast_coin': args.enable_fast_coin,
+                'enable_commit_recheck': args.enable_commit_recheck,
                 'design_tag': args.design_tag,
             },
         )

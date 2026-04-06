@@ -253,11 +253,13 @@ def cloudlab_remote(
     coverage=7,
     allow_cross_step_weak_edges=True,
     enable_fast_coin=True,
-    design_tag='manta-fast-coin-2',
+    enable_commit_recheck=True,
+    design_tag='manta-max_delay_50',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
     enable_fast_coin = _coerce_bool(enable_fast_coin)
+    enable_commit_recheck = _coerce_bool(enable_commit_recheck)
     bench_params = {
         'faults': 0,
         'nodes': [10],
@@ -271,18 +273,19 @@ def cloudlab_remote(
     }
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 200,  # ms
+        'max_header_delay': 50,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
-        'batch_size': 500_000,  # bytes
-        'max_batch_delay': 200,  # ms
+        'batch_size': 128_000,  # bytes
+        'max_batch_delay': 50,  # ms
         'sigma': sigma,
         'kappa': kappa,
         'reference': reference,
         'coverage': coverage,
         'allow_cross_step_weak_edges': allow_cross_step_weak_edges,
         'enable_fast_coin': enable_fast_coin,
+        'enable_commit_recheck': enable_commit_recheck,
         'design_tag': design_tag,
         # 's': 0.99,
     }

@@ -974,6 +974,10 @@ class CloudLabBench:
             'enable_fast_coin',
             False,
         )
+        enable_commit_recheck = node_parameters.json.get(
+            'enable_commit_recheck',
+            True,
+        )
         committee = Committee(
             addresses,
             self.settings.base_port,
@@ -983,6 +987,7 @@ class CloudLabBench:
             coverage,
             allow_cross_step_weak_edges,
             enable_fast_coin,
+            enable_commit_recheck,
         )
         committee.print(PathMaker.committee_file())
         

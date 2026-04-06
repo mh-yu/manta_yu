@@ -304,7 +304,8 @@ impl Consensus {
 
             for (index, pending) in pending_commit_checks.iter_mut().enumerate() {
                 let should_evaluate_pending = evaluate_pending_indices.contains(&index);
-                if !should_evaluate_pending
+                if self.committee.enable_commit_recheck
+                    && !should_evaluate_pending
                     && round == pending.support_round
                     && !pending
                         .seen_support_certificate_digests

@@ -18,6 +18,10 @@ fn default_enable_fast_coin() -> bool {
     false
 }
 
+fn default_enable_commit_recheck() -> bool {
+    true
+}
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("Node {0} is not in the committee")]
@@ -164,6 +168,10 @@ pub struct Committee {
     /// than the regular solid-wave commit check.
     #[serde(default = "default_enable_fast_coin")]
     pub enable_fast_coin: bool,
+    /// Whether a pending commit check should be re-evaluated when additional
+    /// late support certificates for the same support round arrive.
+    #[serde(default = "default_enable_commit_recheck")]
+    pub enable_commit_recheck: bool,
 }
 
 impl Import for Committee {}
@@ -386,6 +394,7 @@ mod tests {
             coverage: 0,
             allow_cross_step_weak_edges: true,
             enable_fast_coin: false,
+            enable_commit_recheck: true,
         }
     }
 
