@@ -7,6 +7,14 @@ from datetime import datetime
 from glob import glob
 from os.path import join
 
+from benchmark.dag_vis import (
+    build_annotated_dag_snapshot,
+    collect_best_round_snapshots,
+    export_dag_event_csv,
+    export_dag_overview_html,
+    export_dag_overview_json,
+)
+
 
 class BenchError(Exception):
     def __init__(self, message, error):
@@ -95,6 +103,18 @@ class PathMaker:
     @staticmethod
     def solid_step_vertices_csv_file():
         return join(PathMaker.results_path(), 'solid_step_vertices.csv')
+
+    @staticmethod
+    def dag_events_csv_file():
+        return join(PathMaker.results_path(), 'dag_events.csv')
+
+    @staticmethod
+    def dag_overview_json_file():
+        return join(PathMaker.results_path(), 'dag_overview.json')
+
+    @staticmethod
+    def dag_overview_html_file():
+        return join(PathMaker.results_path(), 'dag_overview.html')
 
     @staticmethod
     def plots_path():
@@ -235,33 +255,24 @@ class PathMaker:
         if solid_step_csv:
             artifacts['solid_step_vertices_csv'] = solid_step_csv
 
+        annotated = PathMaker.export_annotated_dag_artifacts(final_dag_file=final_dag)
+        artifacts.update(annotated)
+
         return artifacts
 
     @staticmethod
     def export_final_dag(log_files=None, output_file=None):
         log_files = log_files or sorted(glob(join(PathMaker.logs_path(), 'primary-*.log')))
-        round_line_re = re.compile(r"\bRound\s+(\d+):\s+(.*)")
-        latest = {}
+        best = collect_best_round_snapshots(log_files)
 
-        for path in log_files:
-            if not os.path.exists(path):
-                continue
-            with open(path, 'r', errors='replace') as f:
-                for line in f:
-                    match = round_line_re.search(line)
-                    if not match:
-                        continue
-                    round_num = int(match.group(1))
-                    latest[round_num] = f"Round {round_num}: {match.group(2).strip()}"
-
-        if not latest:
+        if not best:
             return None
 
         output_file = output_file or PathMaker.final_dag_file()
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         with open(output_file, 'w') as f:
-            for round_num in sorted(latest):
-                f.write(latest[round_num])
+            for round_num in sorted(best):
+                f.write(f"Round {round_num}: {best[round_num]['raw']}")
                 f.write('\n')
         return output_file
 
@@ -317,6 +328,37 @@ class PathMaker:
             ):
                 writer.writerow(row)
         return output_file
+
+    @staticmethod
+    def export_annotated_dag_artifacts(log_files=None, final_dag_file=None):
+        log_files = log_files or sorted(glob(join(PathMaker.logs_path(), 'primary-*.log')))
+        final_dag_file = final_dag_file or PathMaker.final_dag_file()
+        if not log_files or not final_dag_file or not os.path.exists(final_dag_file):
+            return {}
+
+        snapshot = build_annotated_dag_snapshot(final_dag_file, log_files)
+        if not snapshot['rounds']:
+            return {}
+
+        artifacts = {}
+
+        dag_events_csv = export_dag_event_csv(log_files, PathMaker.dag_events_csv_file())
+        if dag_events_csv:
+            artifacts['dag_events_csv'] = dag_events_csv
+
+        dag_overview_json = export_dag_overview_json(
+            snapshot, PathMaker.dag_overview_json_file()
+        )
+        if dag_overview_json:
+            artifacts['dag_overview_json'] = dag_overview_json
+
+        dag_overview_html = export_dag_overview_html(
+            snapshot, PathMaker.dag_overview_html_file()
+        )
+        if dag_overview_html:
+            artifacts['dag_overview_html'] = dag_overview_html
+
+        return artifacts
 
 
 class Color:

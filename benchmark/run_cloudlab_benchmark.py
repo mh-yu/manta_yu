@@ -110,6 +110,10 @@ def process_logs(faults=0, save_to_file=True):
             Print.info(
                 f'Solid-step CSV exported to: {artifacts["solid_step_vertices_csv"]}'
             )
+        if 'dag_events_csv' in artifacts:
+            Print.info(f'DAG events CSV exported to: {artifacts["dag_events_csv"]}')
+        if 'dag_overview_html' in artifacts:
+            Print.info(f'DAG overview HTML exported to: {artifacts["dag_overview_html"]}')
         
         return True
         
