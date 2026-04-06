@@ -10,6 +10,10 @@ use std::io::Write as _;
 use std::net::SocketAddr;
 use thiserror::Error;
 
+fn default_allow_cross_step_weak_edges() -> bool {
+    true
+}
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("Node {0} is not in the committee")]
@@ -148,6 +152,10 @@ pub struct Committee {
     pub reference: usize,
     /// The coverage parameter for the solid step.
     pub coverage: usize,
+    /// Whether weak parents may extend from the current solid step into earlier
+    /// solid steps that are still inside the current solid-wave window.
+    #[serde(default = "default_allow_cross_step_weak_edges")]
+    pub allow_cross_step_weak_edges: bool,
 }
 
 impl Import for Committee {}
@@ -311,6 +319,17 @@ impl Committee {
         Self::overlapping_segment_start_before(round, self.solid_wave_length())
     }
 
+    /// Returns the first round allowed for weak parents that extend beyond the
+    /// current strong-parent round. When cross-step weak edges are disabled, we
+    /// clamp the weak-parent window to the current solid step.
+    pub fn cross_step_weak_parent_start(&self, round: u64) -> u64 {
+        if self.allow_cross_step_weak_edges {
+            self.solid_wave_parent_start(round)
+        } else {
+            self.solid_step_parent_start(round)
+        }
+    }
+
     /// Returns the solid-wave boundary at or before the provided round.
     pub fn solid_wave_boundary_at_or_before(&self, round: u64) -> u64 {
         if round == 0 {
@@ -357,6 +376,7 @@ mod tests {
             kappa: 2,
             reference: 0,
             coverage: 0,
+            allow_cross_step_weak_edges: true,
         }
     }
 
@@ -390,5 +410,14 @@ mod tests {
         assert_eq!(committee.solid_wave_parent_start(6), 5);
         assert_eq!(committee.solid_wave_parent_start(8), 5);
         assert_eq!(committee.solid_wave_parent_start(9), 5);
+    }
+
+    #[test]
+    fn configurable_cross_step_weak_parent_start() {
+        let mut committee = overlapping_committee();
+        assert_eq!(committee.cross_step_weak_parent_start(8), 5);
+
+        committee.allow_cross_step_weak_edges = false;
+        assert_eq!(committee.cross_step_weak_parent_start(8), 7);
     }
 }

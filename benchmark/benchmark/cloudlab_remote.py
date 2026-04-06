@@ -966,6 +966,10 @@ class CloudLabBench:
         kappa = node_parameters.json.get('kappa', 2)
         reference = node_parameters.json.get('reference', 4)
         coverage = node_parameters.json.get('coverage', 7)
+        allow_cross_step_weak_edges = node_parameters.json.get(
+            'allow_cross_step_weak_edges',
+            True,
+        )
         committee = Committee(
             addresses,
             self.settings.base_port,
@@ -973,6 +977,7 @@ class CloudLabBench:
             kappa,
             reference,
             coverage,
+            allow_cross_step_weak_edges,
         )
         committee.print(PathMaker.committee_file())
         

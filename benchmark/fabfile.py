@@ -8,6 +8,11 @@ from benchmark.cloudlab_instance import CloudLabInstanceManager
 from benchmark.cloudlab_remote import CloudLabBench
 from benchmark.utils import BenchError
 
+def _coerce_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+
 # Import AWS remote benchmark module only when needed (lazy import).
 try:
     from benchmark.remote import Bench
@@ -52,6 +57,7 @@ def local(ctx, debug=False):
         'kappa': 2,
         'reference': 4,
         'coverage': 7,
+        'allow_cross_step_weak_edges': True,
         's': 0.99
     }
     try:
@@ -240,13 +246,15 @@ def cloudlab_install(ctx):
 def cloudlab_remote(
     ctx,
     debug=False,
-    sigma=1,
+    sigma=2,
     kappa=2,
     reference=4,
     coverage=7,
-    design_tag='tusk-like',
+    allow_cross_step_weak_edges=True,
+    design_tag='manta-no-commitonly',
 ):
     ''' Run benchmarks on CloudLab '''
+    allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
     bench_params = {
         'faults': 0,
         'nodes': [10],
@@ -270,6 +278,7 @@ def cloudlab_remote(
         'kappa': kappa,
         'reference': reference,
         'coverage': coverage,
+        'allow_cross_step_weak_edges': allow_cross_step_weak_edges,
         'design_tag': design_tag,
         # 's': 0.99,
     }

@@ -167,6 +167,13 @@ Examples:
                        help='Reference value for cloudlab_remote (default: 4)')
     parser.add_argument('--coverage', type=int, default=7,
                        help='Coverage value for cloudlab_remote (default: 7)')
+    parser.add_argument('--allow-cross-step-weak-edges', dest='allow_cross_step_weak_edges',
+                       action='store_true',
+                       help='Enable weak edges that can cross solid-step boundaries within the same wave')
+    parser.add_argument('--disable-cross-step-weak-edges', dest='allow_cross_step_weak_edges',
+                       action='store_false',
+                       help='Disable weak edges that cross solid-step boundaries; keep weak edges inside each solid step')
+    parser.set_defaults(allow_cross_step_weak_edges=True)
     parser.add_argument('--design-tag', default='manta',
                        help='Design tag written to summary and run directory name (default: manta)')
     
@@ -195,6 +202,7 @@ Examples:
                 'kappa': args.kappa,
                 'reference': args.reference,
                 'coverage': args.coverage,
+                'allow_cross_step_weak_edges': args.allow_cross_step_weak_edges,
                 'design_tag': args.design_tag,
             },
         )

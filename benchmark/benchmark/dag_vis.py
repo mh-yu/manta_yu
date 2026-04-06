@@ -372,9 +372,12 @@ def _support_badges(events: List[Dict[str, Any]]) -> str:
 
 
 def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Optional[str]:
-    rounds = snapshot.get("rounds", [])
-    if not rounds:
+    all_rounds = snapshot.get("rounds", [])
+    if not all_rounds:
         return None
+    max_render_rounds = 30
+    rounds = all_rounds[:max_render_rounds]
+    rendered_round_count = len(rounds)
 
     all_vertices = [vertex["vertex"] for round_item in rounds for vertex in round_item["vertices"]]
     node_ids = sorted(set(all_vertices))
@@ -709,6 +712,7 @@ def export_dag_overview_html(snapshot: Dict[str, Any], output_file: str) -> Opti
       <h1>带提交标注的 DAG 总览</h1>
       <p>当前语义：第一次在下一轮首个顶点到达时激活检查；之后只要 support round 有晚到证书，就对同一组 leader/support 重新检查，直到成功提交或进入下一次检查窗口。</p>
       <p>来源日志: {html.escape(summary.get("selected_log") or "-")}</p>
+      <p>图中仅展示前 {rendered_round_count} 轮；上方统计指标仍基于全量 DAG 轮次与提交事件计算。</p>
       <div class="metrics">
         <div class="metric"><div class="label">Leader 轮数</div><div class="value">{summary["leader_rounds"]}</div></div>
         <div class="metric"><div class="label">成功提交的 Leader</div><div class="value">{summary["committed_leader_rounds"]}</div></div>

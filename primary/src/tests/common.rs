@@ -63,6 +63,11 @@ pub fn committee() -> Committee {
                 )
             })
             .collect(),
+        sigma: 2,
+        kappa: 2,
+        reference: 3,
+        coverage: 3,
+        allow_cross_step_weak_edges: true,
     }
 }
 

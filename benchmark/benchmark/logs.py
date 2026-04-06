@@ -225,6 +225,7 @@ class LogParser:
             ('Kappa', 'kappa'),
             ('Reference', 'reference'),
             ('Coverage', 'coverage'),
+            ('Allow cross-step weak edges', 'allow_cross_step_weak_edges'),
             ('Design tag', 'design_tag'),
         ):
             value = node_params.get(key)

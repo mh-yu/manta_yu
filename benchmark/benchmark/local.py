@@ -27,6 +27,10 @@ class LocalBench:
             self.kappa = node_parameters_dict['kappa']
             self.reference = node_parameters_dict['reference']
             self.coverage = node_parameters_dict['coverage']
+            self.allow_cross_step_weak_edges = node_parameters_dict.get(
+                'allow_cross_step_weak_edges',
+                True,
+            )
         except ConfigError as e:
             raise BenchError('Invalid nodes or bench parameters', e)
 
@@ -103,7 +107,16 @@ class LocalBench:
                 keys += [Key.from_file(filename)]
 
             names = [x.name for x in keys]
-            committee = LocalCommittee(names, self.BASE_PORT, self.workers, self.sigma, self.kappa, self.reference, self.coverage)
+            committee = LocalCommittee(
+                names,
+                self.BASE_PORT,
+                self.workers,
+                self.sigma,
+                self.kappa,
+                self.reference,
+                self.coverage,
+                self.allow_cross_step_weak_edges,
+            )
             committee.print(PathMaker.committee_file())
 
             self.node_parameters.print(PathMaker.parameters_file())

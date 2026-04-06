@@ -132,11 +132,13 @@ impl CertificatesAggregator {
             return Ok(None);
         }
 
-        // Accept parents from the whole solid-wave window, but only the newer
-        // solid-step sub-window contributes to processing/solid-step checks.
+        // Accept strong parents from the previous round. Weak parents always
+        // remain available inside the current solid step; optionally they may
+        // extend into earlier solid steps that still lie inside the current
+        // solid-wave window.
         let current_round = self.expected_round + 1;
         let regular_weak_start = committee.solid_step_parent_start(current_round);
-        let commit_weak_start = committee.solid_wave_parent_start(current_round);
+        let cross_step_weak_start = committee.cross_step_weak_parent_start(current_round);
 
         // Add the certificate to the appropriate list.
         if certificate.round() == self.expected_round {
@@ -151,7 +153,7 @@ impl CertificatesAggregator {
             self.weak_certificates.push(certificate.digest());
             self.extend_step_union(&certificate);
             self.extend_wave_union(&certificate);
-        } else if certificate.round() >= commit_weak_start
+        } else if certificate.round() >= cross_step_weak_start
             && certificate.round() < regular_weak_start
         {
             self.certificates.push(certificate.digest());
@@ -161,11 +163,11 @@ impl CertificatesAggregator {
             return Ok(None);
         }
         debug!(
-            "Current round: {}, regular weak range: [{}..={}), commit-only weak range: [{}..={})",
+            "Current round: {}, regular weak range: [{}..={}), cross-step weak range: [{}..={})",
             current_round,
             regular_weak_start,
             self.expected_round,
-            commit_weak_start,
+            cross_step_weak_start,
             regular_weak_start
         );
 

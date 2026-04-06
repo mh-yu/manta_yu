@@ -203,19 +203,20 @@ impl Core {
             return Ok(());
         }
 
-        // Check the parent certificates. We allow commit-time weak edges from the whole
-        // solid-wave window, but only the solid-step window contributes to processing.
+        // Check the parent certificates. Weak parents are always allowed inside
+        // the current solid step; optionally they may extend into earlier solid
+        // steps that still lie inside the current solid-wave window.
         let round = header.round as u64;
         let is_solid_step = self.committee.is_solid_step(round);
         let regular_weak_start = self.committee.solid_step_parent_start(round);
-        let commit_weak_start = self.committee.solid_wave_parent_start(round);
+        let cross_step_weak_start = self.committee.cross_step_weak_parent_start(round);
 
         let mut stake = 0u64;
         let mut solid_step_union = HashSet::new();
 
         for x in &parents {
             ensure!(
-                x.round() >= commit_weak_start && x.round() < round,
+                x.round() >= cross_step_weak_start && x.round() < round,
                 DagError::MalformedHeader(header.id.clone())
             );
             if x.round() >= regular_weak_start {
