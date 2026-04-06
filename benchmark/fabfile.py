@@ -252,7 +252,7 @@ def cloudlab_remote(
     reference=4,
     coverage=7,
     allow_cross_step_weak_edges=True,
-    enable_fast_coin=False,
+    enable_fast_coin=True,
     enable_commit_recheck=True,
     design_tag='manta-max_delay_50',
 ):
@@ -269,7 +269,7 @@ def cloudlab_remote(
         'rate': [20000,40000,60000,80000,100000,120000,140000,160000,180000,200000],
         'tx_size': 512,
         'duration': 20,
-        'runs': 1,
+        'runs': 2,
     }
     node_params = {
         'header_size': 1_000,  # bytes
