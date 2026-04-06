@@ -511,26 +511,30 @@ async fn fast_coin_commits_before_regular_path() {
 
     assert!(
         consensus.fast_coin_pending_commit_check_for_round(2, &state).is_none(),
-        "one round-2 support certificate should not activate fast coin yet"
+        "fast coin should not activate before the first round-3 trigger arrives"
     );
 
     state.insert(support_round_2_b);
+    assert!(
+        consensus.fast_coin_pending_commit_check_for_round(2, &state).is_none(),
+        "even with enough round-2 support certificates, activation should still wait for round 3"
+    );
+
+    state.insert(activation_round_3.clone());
     let mut fast_pending = consensus
-        .fast_coin_pending_commit_check_for_round(2, &state)
-        .expect("round 2 should activate a fast-coin pending check once f+1 supports arrive");
+        .fast_coin_pending_commit_check_for_round(3, &state)
+        .expect("the first round-3 trigger should activate the r2 -> r1 fast-coin check");
     assert_eq!(fast_pending.leader_round, 1);
     assert_eq!(fast_pending.support_round, 2);
 
     let committed = consensus
-        .evaluate_pending_commit_check(&mut state, 2, &mut fast_pending)
+        .evaluate_pending_commit_check(&mut state, 3, &mut fast_pending)
         .await;
-    assert!(committed, "f+1 round-2 support certificates should let fast coin commit immediately");
+    assert!(committed, "round-3 activation should immediately commit once round-2 support is already sufficient");
 
     let committed_leader = rx_output.recv().await.unwrap();
     assert_eq!(committed_leader.round(), 1);
     assert_eq!(committed_leader.origin(), leader_author);
-
-    state.insert(activation_round_3.clone());
 
     let regular_pending = consensus.solid_pending_commit_check_for_round(4, &state);
     assert!(

@@ -1,6 +1,7 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use super::*;
 use crate::common::{committee, keys};
+use std::fs;
 use tokio::sync::mpsc::channel;
 
 #[tokio::test]
@@ -11,6 +12,9 @@ async fn propose_empty() {
     let (_tx_parents, rx_parents) = channel(1);
     let (_tx_our_digests, rx_our_digests) = channel(1);
     let (tx_headers, mut rx_headers) = channel(1);
+    let path = ".db_test_propose_empty";
+    let _ = fs::remove_dir_all(path);
+    let store = store::Store::new(path).unwrap();
 
     // Spawn the proposer.
     Proposer::spawn(
@@ -44,7 +48,7 @@ async fn propose_payload() {
     // Create a new test store.
     let path = ".db_test_propose_payload";
     let _ = fs::remove_dir_all(path);
-    let store = Store::new(path).unwrap();
+    let store = store::Store::new(path).unwrap();
 
     // Spawn the proposer.
     Proposer::spawn(

@@ -262,7 +262,9 @@ impl Consensus {
 
             let mut evaluate_pending_indices = Vec::new();
             let candidates = self.pending_commit_checks_for_round(round, &state);
-            if let Some(newest_leader_round) = candidates.iter().map(|candidate| candidate.leader_round).max() {
+            if let Some(newest_leader_round) =
+                candidates.iter().map(|candidate| candidate.leader_round).max()
+            {
                 let mut retired = Vec::new();
                 pending_commit_checks.retain(|pending| {
                     let keep = pending.leader_round >= newest_leader_round;
@@ -282,7 +284,6 @@ impl Consensus {
                     );
                 }
             }
-
             for candidate in candidates {
                 let already_pending = pending_commit_checks
                     .iter()
@@ -417,20 +418,16 @@ impl Consensus {
         }
 
         let step_length = self.committee.solid_step_length();
-        if step_length <= 1 || round < step_length {
-            return None;
-        }
-        if !self.committee.is_solid_step(round + 1) {
+        if step_length <= 1 || round <= step_length {
             return None;
         }
 
-        let support_round = round;
-        let support_certificate_count = Self::support_certificate_digests(state, support_round).len();
-        if support_certificate_count < self.committee.validity_threshold() as usize {
+        if !self.committee.is_solid_step(round) {
             return None;
         }
 
-        let leader_round = round - step_length + 1;
+        let support_round = round - 1;
+        let leader_round = support_round - step_length + 1;
         if leader_round != 1 && !self.committee.is_solid_wave(leader_round) {
             return None;
         }

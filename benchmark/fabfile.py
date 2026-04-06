@@ -253,7 +253,7 @@ def cloudlab_remote(
     coverage=7,
     allow_cross_step_weak_edges=True,
     enable_fast_coin=True,
-    design_tag='manta-fast-coin',
+    design_tag='manta-fast-coin-2',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
