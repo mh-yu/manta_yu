@@ -78,6 +78,8 @@ class LocalBench:
         try:
             Print.info('Setting up testbed...')
             nodes, rate, rate_type = self.nodes[0], self.rate[0], self.rate_type
+            run_dir = PathMaker.create_run_directory(f'local-n{nodes}-r{rate}')
+            Print.info(f'Run outputs directory: {run_dir}')
 
             # Cleanup all files.
             cmd = f'{CommandMaker.clean_logs()} ; {CommandMaker.cleanup()}'
@@ -173,12 +175,24 @@ class LocalBench:
 
             # Parse logs and return the parser.
             Print.info('Parsing logs...')
-            return LogParser.process(
+            logger = LogParser.process(
                 PathMaker.logs_path(),
                 faults=self.faults,
                 default_client_size=self.tx_size,
                 default_client_rates=client_rates,
             )
+            logger.print(PathMaker.summary_file())
+            logger.print(PathMaker.result_file(
+                self.faults,
+                nodes,
+                self.workers,
+                True,
+                rate,
+                self.tx_size,
+            ))
+            logger.export_latency_csv()
+            PathMaker.export_run_artifacts()
+            return logger
 
         except (subprocess.SubprocessError, ParseError) as e:
             self._kill_nodes()

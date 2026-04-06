@@ -11,10 +11,14 @@ import os
 import re
 from typing import List, Dict, Any
 
+from benchmark.utils import PathMaker
+
 
 LINE_RE = re.compile(
     r"\[(?P<ts>[^]]+)\s+DEBUG\s+primary::(?:proposer|aggregators)\]\s+"
-    r"Current round:\s+(?P<round>\d+),\s+The number of the solid step vertices is\s+(?P<count>\d+)"
+    r"Current round:\s+(?P<round>\d+),\s+"
+    r"(?:(?:The number of (?:merged )?solid-step vertices is)\s+|solid_step_vertices=)"
+    r"(?P<count>\d+)"
 )
 
 
@@ -66,7 +70,7 @@ def main() -> None:
 
     log_files = args.logs
     if not log_files:
-        log_files = sorted(glob.glob("logs/primary-*.log"))
+        log_files = sorted(glob.glob(os.path.join(PathMaker.logs_path(), "primary-*.log")))
 
     rows = parse_logs(log_files)
     rows.sort(key=lambda r: (r["round"], r["primary"], r["timestamp"]))

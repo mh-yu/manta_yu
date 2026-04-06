@@ -349,12 +349,17 @@ class Bench:
                 for i in range(bench_parameters.runs):
                     Print.heading(f'Run {i+1}/{bench_parameters.runs}')
                     try:
+                        run_dir = PathMaker.create_run_directory(
+                            f'remote-n{n}-r{r}-run{i+1}'
+                        )
+                        Print.info(f'Run outputs directory: {run_dir}')
                         self._run_single(
                             r, committee_copy, bench_parameters, debug
                         )
 
                         faults = bench_parameters.faults
                         logger = self._logs(committee_copy, faults)
+                        logger.print(PathMaker.summary_file())
                         logger.print(PathMaker.result_file(
                             faults,
                             n, 
@@ -363,6 +368,8 @@ class Bench:
                             r, 
                             bench_parameters.tx_size, 
                         ))
+                        logger.export_latency_csv()
+                        PathMaker.export_run_artifacts()
                     except (subprocess.SubprocessError, GroupException, ParseError) as e:
                         self.kill(hosts=selected_hosts)
                         if isinstance(e, GroupException):

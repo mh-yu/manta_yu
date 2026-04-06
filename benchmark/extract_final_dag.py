@@ -11,6 +11,8 @@ import os
 import re
 from typing import Dict, List, Any
 
+from benchmark.utils import PathMaker
+
 
 ROUND_LINE_RE = re.compile(r"\bRound\s+(\d+):\s+(.*)")
 VERTEX_RE = re.compile(r"\(Vertex(\d+)\)\[([^\]]*)\](?:\s+weak=\[([^\]]*)\])?")
@@ -97,7 +99,7 @@ def main() -> None:
 
     log_files = args.logs
     if not log_files:
-        log_files = sorted(glob.glob("logs/primary-*.log"))
+        log_files = sorted(glob.glob(os.path.join(PathMaker.logs_path(), "primary-*.log")))
 
     latest = collect_latest_rounds(log_files)
     if not latest:

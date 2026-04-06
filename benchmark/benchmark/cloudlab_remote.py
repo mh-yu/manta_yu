@@ -1089,7 +1089,7 @@ class CloudLabBench:
             if run_benchmark_script.exists():
                 Print.info('Running run_cloudlab_benchmark.py --no-run to process logs...')
                 result = subprocess.run(
-                    [sys.executable, str(run_benchmark_script), '--no-run'],
+                    [sys.executable, str(run_benchmark_script), '--no-run', '--no-save'],
                     cwd=str(benchmark_dir),
                     capture_output=False,  # Show output in real-time
                     text=True
@@ -1547,6 +1547,11 @@ SCRIPTEOF'''
                         Print.heading(f'\nRunning benchmark: nodes={n}, rate={rate}{attack_str}, run={run+1}/{bench_parameters.runs}')
                         
                         try:
+                            run_label = f'cloudlab-n{n}-r{rate}-run{run+1}'
+                            if trigger_attack is not None:
+                                run_label += f'-attack-{"on" if trigger_attack else "off"}'
+                            run_dir = PathMaker.create_run_directory(run_label)
+                            Print.info(f'Run outputs directory: {run_dir}')
                             # Run the actual benchmark
                             self._run_single(
                                 rate, committee_copy, bench_parameters, node_parameters, selected_hosts, debug
@@ -1554,6 +1559,7 @@ SCRIPTEOF'''
                             
                             # Download and parse logs
                             result = self._logs(committee_copy, bench_parameters.faults, max_workers=bench_parameters.workers)
+                            result.print(PathMaker.summary_file())
                             result.print(PathMaker.result_file(
                                 bench_parameters.faults,
                                 n,
@@ -1562,6 +1568,8 @@ SCRIPTEOF'''
                                 rate,
                                 bench_parameters.tx_size,
                             ))
+                            result.export_latency_csv()
+                            PathMaker.export_run_artifacts()
                         except (subprocess.SubprocessError, GroupException, ParseError) as e:
                             self.kill(hosts=selected_hosts)
                             if isinstance(e, GroupException):

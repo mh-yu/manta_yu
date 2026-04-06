@@ -201,7 +201,7 @@ impl Consensus {
             state.insert(certificate);
 
             // Emit DAG visualization for extract_final_dag / extract_dag_out (full DAG per round).
-            // self.visualize_dag(&state, round);
+            self.visualize_dag(&state, round);
 
             // Narwhal-style commit loop adapted to solid waves:
             // only commit on solid-wave boundary rounds, and validate the leader from the

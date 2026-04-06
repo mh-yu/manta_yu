@@ -1,4 +1,6 @@
 # Copyright(C) Facebook, Inc. and its affiliates.
+import csv
+import os
 from datetime import datetime
 from glob import glob
 from multiprocessing import Pool
@@ -6,7 +8,7 @@ from os.path import join
 from re import findall, search
 from statistics import mean
 
-from benchmark.utils import Print
+from benchmark.utils import PathMaker, Print
 
 
 class ParseError(Exception):
@@ -257,6 +259,42 @@ class LogParser:
         assert isinstance(filename, str)
         with open(filename, 'a') as f:
             f.write(self.result())
+
+    def export_latency_csv(self, filename=None):
+        filename = filename or PathMaker.latency_csv_file()
+        rows = []
+
+        for batch_id, commit_ts in sorted(self.commits.items(), key=lambda item: item[1]):
+            proposal_ts = self.proposals.get(batch_id)
+            if proposal_ts is None:
+                continue
+            rows.append({
+                'metric': 'consensus_latency',
+                'identifier': batch_id,
+                'latency_ms': round((commit_ts - proposal_ts) * 1000, 3),
+            })
+
+        for sent, received in zip(self.sent_samples, self.received_samples):
+            for tx_id, batch_id in received.items():
+                commit_ts = self.commits.get(batch_id)
+                start_ts = sent.get(tx_id)
+                if commit_ts is None or start_ts is None:
+                    continue
+                rows.append({
+                    'metric': 'end_to_end_latency',
+                    'identifier': tx_id,
+                    'latency_ms': round((commit_ts - start_ts) * 1000, 3),
+                })
+
+        if not rows:
+            return None
+
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=['metric', 'identifier', 'latency_ms'])
+            writer.writeheader()
+            writer.writerows(rows)
+        return filename
 
     @classmethod
     def process(cls, directory, faults=0, default_client_size=None,

@@ -12,6 +12,8 @@ import os
 import re
 from typing import Dict, List, Tuple
 
+from benchmark.utils import PathMaker
+
 ROUND_LINE_RE = re.compile(r"\bRound\s+(\d+):\s+(.*)")
 VERTEX_ID_RE = re.compile(r"\(Vertex(\d+)\)")
 PARENT_RE = re.compile(r"\[(w?)(\d+|\?),\s*(\d+|\?)\]")
@@ -63,8 +65,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--input",
-        default="benchmark/final_dag.txt",
-        help="Path to a DAG visualization file (default: benchmark/final_dag.txt).",
+        default=PathMaker.final_dag_file(),
+        help="Path to a DAG visualization file (default: current run final_dag.txt).",
     )
     parser.add_argument(
         "--json",

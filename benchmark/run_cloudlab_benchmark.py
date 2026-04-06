@@ -84,12 +84,9 @@ def process_logs(faults=0, save_to_file=True):
         
         # Save to file
         if save_to_file:
-            results_dir = Path(PathMaker.results_path())
-            results_dir.mkdir(parents=True, exist_ok=True)
-            
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            result_file = results_dir / f'benchmark_result_{timestamp}.txt'
-            
+            result_file = Path(PathMaker.summary_file())
+            result_file.parent.mkdir(parents=True, exist_ok=True)
+
             with open(result_file, 'w') as f:
                 f.write(f'Benchmark Results - {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
                 f.write('=' * 60 + '\n')
@@ -103,6 +100,14 @@ def process_logs(faults=0, save_to_file=True):
             Print.info(f'Latency CSV exported to: {csv_file}')
         else:
             Print.warn('Failed to export latency CSV (no latency data available)')
+
+        artifacts = PathMaker.export_run_artifacts()
+        if 'final_dag' in artifacts:
+            Print.info(f'Final DAG exported to: {artifacts["final_dag"]}')
+        if 'solid_step_vertices_csv' in artifacts:
+            Print.info(
+                f'Solid-step CSV exported to: {artifacts["solid_step_vertices_csv"]}'
+            )
         
         return True
         
@@ -155,12 +160,23 @@ Examples:
     Print.info('=' * 60)
     
     success = True
+
+    if args.no_run or args.download_only:
+        current_run = PathMaker.current_run_path()
+        if current_run:
+            PathMaker.activate_run_directory(current_run)
+        else:
+            run_dir = PathMaker.create_run_directory('cloudlab-manual')
+            Print.info(f'Run outputs directory: {run_dir}')
     
     # Step 1: Run benchmark (unless skipped)
     if not args.no_run and not args.download_only:
         success = run_fab_command('cloudlab_remote', debug=args.debug)
         if not success:
             Print.warn('Benchmark run completed with errors, but continuing to process logs...')
+        current_run = PathMaker.current_run_path()
+        if current_run:
+            PathMaker.activate_run_directory(current_run)
     
     # Step 2: Download logs if needed (unless download-only)
     if not args.download_only:

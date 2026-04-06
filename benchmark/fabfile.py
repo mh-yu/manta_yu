@@ -3,7 +3,7 @@ from fabric import task
 
 from benchmark.local import LocalBench
 from benchmark.logs import ParseError, LogParser
-from benchmark.utils import Print
+from benchmark.utils import Print, PathMaker
 from benchmark.cloudlab_instance import CloudLabInstanceManager
 from benchmark.cloudlab_remote import CloudLabBench
 from benchmark.utils import BenchError
@@ -203,7 +203,7 @@ def kill(ctx):
 def logs(ctx):
     ''' Print a summary of the logs '''
     try:
-        print(LogParser.process('./logs', faults='?').result())
+        print(LogParser.process(PathMaker.logs_path(), faults='?').result())
     except ParseError as e:
         Print.error(BenchError('Failed to parse logs', e))
 
@@ -244,11 +244,11 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2):
         'nodes': [10],
         'workers': 1,
         'collocate': True,
-        'rate_type': 'imbalanced',
+        'rate_type': 'balanced',
         'rate': [60000],
         'tx_size': 512,
         'duration': 20,
-        'runs': 1,
+        'runs': 2,
     }
     node_params = {
         'header_size': 1_000,  # bytes
@@ -262,7 +262,7 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2):
         'kappa': 2,
         'reference': 4,
         'coverage': 7,
-        's': 0.99,
+        # 's': 0.99,
     }
     try:
         CloudLabBench(ctx).run(bench_params, node_params, debug)
