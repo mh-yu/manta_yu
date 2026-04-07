@@ -185,52 +185,6 @@ impl Proposer {
         round > 1 && (round - 1) % self.solid_step_length == 0
     }
 
-    fn is_intermediate_round(&self, round: Round) -> bool {
-        round > 1 && !self.is_critical_round(round)
-    }
-
-    fn next_critical_round(&self, round: Round) -> Option<Round> {
-        if !self.is_intermediate_round(round) {
-            return None;
-        }
-
-        Some(1 + (((round - 1) / self.solid_step_length) + 1) * self.solid_step_length)
-    }
-
-    fn critical_round_started(&self, round: Round) -> bool {
-        self.unlocked_rounds
-            .keys()
-            .chain(self.proposed_rounds.iter())
-            .any(|candidate| self.is_critical_round(*candidate) && *candidate >= round)
-    }
-
-    fn is_obsolete_intermediate_round(&self, round: Round) -> bool {
-        self.next_critical_round(round)
-            .map(|next_critical| self.critical_round_started(next_critical))
-            .unwrap_or(false)
-    }
-
-    fn drop_obsolete_intermediate_rounds(&mut self, critical_round: Round) {
-        let stale_rounds: Vec<_> = self
-            .unlocked_rounds
-            .keys()
-            .copied()
-            .filter(|round| {
-                self.next_critical_round(*round)
-                    .map(|next_critical| next_critical <= critical_round)
-                    .unwrap_or(false)
-            })
-            .collect();
-
-        for stale_round in stale_rounds {
-            self.unlocked_rounds.remove(&stale_round);
-            debug!(
-                "Dropping stale intermediate round {} because critical round {} already started",
-                stale_round, critical_round
-            );
-        }
-    }
-
     fn is_round_ready(&self, round: Round, state: &UnlockedRound) -> bool {
         round == 1 || state.ready_since.elapsed() >= self.parent_grace_delay
     }
@@ -272,19 +226,6 @@ impl Proposer {
                 round
             );
             return;
-        }
-
-        if self.is_intermediate_round(round) && self.is_obsolete_intermediate_round(round) {
-            self.unlocked_rounds.remove(&round);
-            debug!(
-                "Discarding intermediate round {} because its next critical round has already started",
-                round
-            );
-            return;
-        }
-
-        if self.is_critical_round(round) {
-            self.drop_obsolete_intermediate_rounds(round);
         }
 
         match self.unlocked_rounds.get_mut(&round) {
@@ -581,9 +522,6 @@ impl Proposer {
                 self.make_header(decision.round, proposal_state, decision.include_payload)
                     .await;
                 self.proposed_rounds.insert(decision.round);
-                if decision.include_payload && self.is_critical_round(decision.round) {
-                    self.drop_obsolete_intermediate_rounds(decision.round);
-                }
                 if decision.include_payload {
                     match selected_class {
                         RoundClass::Critical => critical_payload_deadline = None,
