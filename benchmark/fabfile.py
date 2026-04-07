@@ -254,7 +254,7 @@ def cloudlab_remote(
     allow_cross_step_weak_edges=True,
     enable_fast_coin=True,
     enable_commit_recheck=True,
-    design_tag='manta_2_worker',
+    design_tag='manta_2_worker_new',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
@@ -271,7 +271,7 @@ def cloudlab_remote(
         'rate': [150000],
         'tx_size': 512,
         'duration': 60,
-        'runs': 1,       
+        'runs': 2,       
     }
     node_params = {
         'header_size': 1_000,  # bytes

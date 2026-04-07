@@ -52,3 +52,47 @@ async fn wait_for_quorum() {
     // Ensure the other listeners correctly received the batch.
     assert!(try_join_all(listener_handles).await.is_ok());
 }
+
+#[tokio::test]
+async fn wait_for_availability_quorum() {
+    let (tx_message, rx_message) = channel(1);
+    let (tx_batch, mut rx_batch) = channel(1);
+    let (myself, _) = keys().pop().unwrap();
+    let committee = committee_with_base_port(7_100);
+
+    // Spawn a `QuorumWaiter` instance.
+    QuorumWaiter::spawn(committee.clone(), /* stake */ 1, rx_message, tx_batch);
+
+    // Make a batch.
+    let message = WorkerMessage::Batch(batch());
+    let serialized = bincode::serialize(&message).unwrap();
+    let expected = Bytes::from(serialized.clone());
+
+    // With 4 equally weighted authorities, our own stake plus one acknowledgement
+    // reaches the availability threshold (f+1).
+    let (name, addresses) = committee
+        .others_workers(&myself, /* id */ &0)
+        .into_iter()
+        .next()
+        .unwrap();
+    let address = addresses.worker_to_worker;
+    let listener_handle = listener(address, Some(expected.clone()));
+
+    // Broadcast the batch to a single availability peer.
+    let bytes = Bytes::from(serialized.clone());
+    let handler = ReliableSender::new().send(address, bytes).await;
+
+    // Forward the batch along with the handler to the `QuorumWaiter`.
+    let message = QuorumWaiterMessage {
+        batch: serialized.clone(),
+        handlers: vec![(name, handler)],
+    };
+    tx_message.send(message).await.unwrap();
+
+    // Wait for the `QuorumWaiter` to gather enough acknowledgements and output the batch.
+    let output = rx_batch.recv().await.unwrap();
+    assert_eq!(output, serialized);
+
+    // Ensure the listener correctly received the batch.
+    listener_handle.await.unwrap();
+}
