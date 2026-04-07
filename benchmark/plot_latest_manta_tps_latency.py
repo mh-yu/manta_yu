@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -26,9 +27,9 @@ def parse_int(text: str, label: str) -> int:
     return int(match.group(1).replace(",", ""))
 
 
-def load_rows() -> list[dict[str, int | str]]:
+def load_rows(result_dir: Path) -> list[dict[str, int | str]]:
     rows: list[dict[str, int | str]] = []
-    for summary_path in sorted(RESULT_DIR.rglob("summary.txt")):
+    for summary_path in sorted(result_dir.rglob("summary.txt")):
         entry = summary_path.parent
         if "plots" in summary_path.parts:
             continue
@@ -36,7 +37,7 @@ def load_rows() -> list[dict[str, int | str]]:
         text = summary_path.read_text()
         rows.append(
             {
-                "name": str(entry.relative_to(RESULT_DIR)),
+                "name": str(entry.relative_to(result_dir)),
                 "input_rate": parse_int(text, "Input rate"),
                 "consensus_tps": parse_int(text, "Consensus TPS"),
                 "consensus_latency": parse_int(text, "Consensus latency"),
@@ -46,7 +47,7 @@ def load_rows() -> list[dict[str, int | str]]:
         )
 
     if not rows:
-        raise ValueError(f"no top-level summary files found under {RESULT_DIR}")
+        raise ValueError(f"no summary files found under {result_dir}")
 
     rows.sort(key=lambda row: (int(row["input_rate"]), str(row["name"])))
     return rows
@@ -72,7 +73,12 @@ def aggregate_rows(rows: list[dict[str, int | str]]) -> list[dict[str, float]]:
     return aggregated
 
 
-def draw(rows: list[dict[str, int | str]], aggregated: list[dict[str, float]]) -> None:
+def draw(
+    rows: list[dict[str, int | str]],
+    aggregated: list[dict[str, float]],
+    title: str,
+    output_path: Path,
+) -> None:
     fig, ax = plt.subplots(figsize=(10, 6), dpi=180)
 
     consensus_color = "#f59e0b"
@@ -123,7 +129,7 @@ def draw(rows: list[dict[str, int | str]], aggregated: list[dict[str, float]]) -
             color="#0f172a",
         )
 
-    ax.set_title("Manta TPS-Latency (latest top-level results)")
+    ax.set_title(title)
     ax.set_xlabel("Throughput (tx/s)")
     ax.set_ylabel("Latency (ms)")
     ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5)
@@ -131,14 +137,41 @@ def draw(rows: list[dict[str, int | str]], aggregated: list[dict[str, float]]) -
     ax.margins(x=0.06, y=0.08)
 
     fig.subplots_adjust(left=0.11, right=0.98, bottom=0.11, top=0.90)
-    fig.savefig(OUTPUT_PATH, bbox_inches="tight")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, bbox_inches="tight")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Plot TPS-latency from benchmark summaries.")
+    parser.add_argument(
+        "--input-dir",
+        type=Path,
+        default=RESULT_DIR,
+        help="Directory containing benchmark run subdirectories with summary.txt files.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output PNG path. Defaults to latest_tps_latency.png in the input directory.",
+    )
+    parser.add_argument(
+        "--title",
+        default="Manta TPS-Latency (latest top-level results)",
+        help="Chart title.",
+    )
+    return parser.parse_args()
 
 
 def main() -> None:
-    rows = load_rows()
+    args = parse_args()
+    input_dir = args.input_dir.resolve()
+    output_path = args.output.resolve() if args.output else input_dir / "tps_latency.png"
+
+    rows = load_rows(input_dir)
     aggregated = aggregate_rows(rows)
-    draw(rows, aggregated)
-    print(OUTPUT_PATH)
+    draw(rows, aggregated, args.title, output_path)
+    print(output_path)
 
 
 if __name__ == "__main__":
