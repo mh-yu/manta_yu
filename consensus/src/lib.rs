@@ -381,7 +381,7 @@ impl Consensus {
     }
 
     async fn fast_path(&self, round: Round, state: &mut State) {
-        if round == 0 {
+        if round == 0 && round <= self.last_committed_certificate_round {
             return;
         }
         let Some(current_round_certificates) = state.dag.get(&round) else {
