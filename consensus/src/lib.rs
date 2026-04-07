@@ -227,7 +227,7 @@ impl Consensus {
             state.insert(certificate);
 
             // Fast Path
-            // self.fast_path(round, &mut state).await;
+            self.fast_path(round, &mut state).await;
 
             // Normal Path
             let step_length = self.committee.solid_step_length();
