@@ -82,23 +82,28 @@ async fn propose_payload() {
         rx_core: rx_parents,
         rx_workers: rx_our_digests,
         tx_core: tx_headers,
+        local_workers: 1,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 2,
-        digests: VecDeque::from(vec![(digest, 0)]),
-        payload_size: 32,
+        intermediate_digests: VecDeque::new(),
+        intermediate_payload_size: 0,
+        critical_digests: VecDeque::from(vec![(digest, 0)]),
+        critical_payload_size: 32,
         solid_step_length: committee.solid_step_length(),
         solid_wave_length: committee.solid_wave_length(),
         parent_grace_delay: Duration::from_millis(0),
     };
 
-    let decision = proposer.next_proposal_round(true, true).unwrap();
+    let decision = proposer
+        .next_proposal_round(false, true, true, false, false)
+        .unwrap();
     assert_eq!(decision.round, 3);
     assert!(decision.include_payload);
 }
 
 #[tokio::test]
-async fn intermediate_round_does_not_take_payload() {
+async fn intermediate_round_still_proposes_empty_with_single_worker() {
     let committee = committee();
     let (name, secret) = keys().pop().unwrap();
     let signature_service = SignatureService::new(secret);
@@ -135,23 +140,28 @@ async fn intermediate_round_does_not_take_payload() {
         rx_core: rx_parents,
         rx_workers: rx_our_digests,
         tx_core: tx_headers,
+        local_workers: 1,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 1,
-        digests: VecDeque::from(vec![(Digest(name.0), 0)]),
-        payload_size: 32,
+        intermediate_digests: VecDeque::new(),
+        intermediate_payload_size: 0,
+        critical_digests: VecDeque::from(vec![(Digest(name.0), 0)]),
+        critical_payload_size: 32,
         solid_step_length: committee.solid_step_length(),
         solid_wave_length: committee.solid_wave_length(),
         parent_grace_delay: Duration::from_millis(0),
     };
 
-    let decision = proposer.next_proposal_round(true, true).unwrap();
+    let decision = proposer
+        .next_proposal_round(true, false, false, false, false)
+        .unwrap();
     assert_eq!(decision.round, 2);
     assert!(!decision.include_payload);
 }
 
 #[tokio::test]
-async fn intermediate_round_ignores_payload_even_with_overflow_available() {
+async fn intermediate_round_uses_payload_from_dedicated_queue() {
     let committee = committee();
     let (name, secret) = keys().pop().unwrap();
     let signature_service = SignatureService::new(secret);
@@ -179,11 +189,6 @@ async fn intermediate_round_ignores_payload_even_with_overflow_available() {
         },
     );
 
-    let digests = vec![
-        (Digest([1; 32]), 0),
-        (Digest([2; 32]), 0),
-        (Digest([3; 32]), 0),
-    ];
     let proposer = Proposer {
         name,
         node_id: None,
@@ -193,17 +198,22 @@ async fn intermediate_round_ignores_payload_even_with_overflow_available() {
         rx_core: rx_parents,
         rx_workers: rx_our_digests,
         tx_core: tx_headers,
+        local_workers: 2,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 1,
-        digests: VecDeque::from(digests.clone()),
-        payload_size: 96,
+        intermediate_digests: VecDeque::from(vec![(Digest([1; 32]), 0)]),
+        intermediate_payload_size: 32,
+        critical_digests: VecDeque::from(vec![(Digest([2; 32]), 1)]),
+        critical_payload_size: 32,
         solid_step_length: committee.solid_step_length(),
         solid_wave_length: committee.solid_wave_length(),
         parent_grace_delay: Duration::from_millis(0),
     };
 
-    let decision = proposer.next_proposal_round(true, true).unwrap();
+    let decision = proposer
+        .next_proposal_round(false, false, false, true, true)
+        .unwrap();
     assert_eq!(decision.round, 2);
-    assert!(!decision.include_payload);
+    assert!(decision.include_payload);
 }

@@ -34,6 +34,8 @@ pub struct Proposer {
     rx_workers: Receiver<(Digest, WorkerId)>,
     /// Sends newly created headers to the `Core`.
     tx_core: Sender<Header>,
+    /// Number of local workers attached to this primary.
+    local_workers: usize,
 
     /// Unlocked proposal rounds waiting to be materialized into headers.
     unlocked_rounds: HashMap<Round, UnlockedRound>,
@@ -41,10 +43,14 @@ pub struct Proposer {
     proposed_rounds: HashSet<Round>,
     /// Monotonic unlock order used to preserve "first unlocked, first proposed".
     next_unlock_order: u64,
-    /// Holds the batches' digests waiting to be included in the next header.
-    digests: VecDeque<(Digest, WorkerId)>,
-    /// Keeps track of the size (in bytes) of batches' digests that we received so far.
-    payload_size: usize,
+    /// Digests reserved for intermediate rounds.
+    intermediate_digests: VecDeque<(Digest, WorkerId)>,
+    /// Total size of digests reserved for intermediate rounds.
+    intermediate_payload_size: usize,
+    /// Digests reserved for critical rounds.
+    critical_digests: VecDeque<(Digest, WorkerId)>,
+    /// Total size of digests reserved for critical rounds.
+    critical_payload_size: usize,
     /// The solid step length.
     solid_step_length: u64,
     /// The solid wave length.
@@ -97,6 +103,11 @@ impl Proposer {
             .collect();
         let solid_step_length = committee.solid_step_length() as u64;
         let solid_wave_length = committee.solid_wave_length() as u64;
+        let local_workers = committee
+            .authorities
+            .get(&name)
+            .map(|authority| authority.workers.len())
+            .unwrap_or(1);
         // Disable the parent grace delay so newly unlocked rounds can be proposed immediately.
         let parent_grace_delay_ms = 0;
 
@@ -122,11 +133,14 @@ impl Proposer {
                 rx_core,
                 rx_workers,
                 tx_core,
+                local_workers,
                 unlocked_rounds,
                 proposed_rounds: HashSet::new(),
                 next_unlock_order: 1,
-                digests: VecDeque::with_capacity(2 * header_size),
-                payload_size: 0,
+                intermediate_digests: VecDeque::with_capacity(2 * header_size),
+                intermediate_payload_size: 0,
+                critical_digests: VecDeque::with_capacity(2 * header_size),
+                critical_payload_size: 0,
                 solid_step_length,
                 solid_wave_length,
                 parent_grace_delay: Duration::from_millis(parent_grace_delay_ms),
@@ -221,8 +235,17 @@ impl Proposer {
         round == 1 || state.ready_since.elapsed() >= self.parent_grace_delay
     }
 
-    fn next_recheck_deadline(&self, payload_deadline: Instant) -> Instant {
-        let mut next_deadline = payload_deadline;
+    fn next_recheck_deadline(
+        &self,
+        proposal_deadline: Instant,
+        critical_payload_deadline: Option<Instant>,
+        intermediate_payload_deadline: Option<Instant>,
+    ) -> Instant {
+        let mut next_deadline = std::iter::once(proposal_deadline)
+            .chain(critical_payload_deadline.into_iter())
+            .chain(intermediate_payload_deadline)
+            .min()
+            .unwrap_or(proposal_deadline);
 
         for (round, state) in &self.unlocked_rounds {
             if self.proposed_rounds.contains(round) || state.parents.is_empty() {
@@ -297,11 +320,16 @@ impl Proposer {
 
     fn next_proposal_round(
         &self,
-        timer_expired: bool,
-        enough_digests: bool,
+        proposal_timer_expired: bool,
+        critical_payload_timer_expired: bool,
+        critical_enough_digests: bool,
+        intermediate_payload_timer_expired: bool,
+        intermediate_enough_digests: bool,
     ) -> Option<ProposalDecision> {
-        let payload_trigger = timer_expired || enough_digests;
-        let has_payload = !self.digests.is_empty();
+        let critical_payload_trigger =
+            critical_payload_timer_expired || critical_enough_digests;
+        let intermediate_payload_trigger =
+            intermediate_payload_timer_expired || intermediate_enough_digests;
 
         if let Some((round, _)) = self
             .unlocked_rounds
@@ -319,10 +347,6 @@ impl Proposer {
                 round: *round,
                 include_payload: false,
             });
-        }
-
-        if !payload_trigger {
-            return None;
         }
 
         let critical_round = self
@@ -349,28 +373,74 @@ impl Proposer {
             .min_by_key(|(_, state)| state.unlock_order)
             .map(|(round, _)| *round);
 
-        let selected_round = match (critical_round, intermediate_round) {
-            (Some(critical_round), Some(_)) if has_payload => Some(critical_round),
-            (_, Some(intermediate_round)) => Some(intermediate_round),
-            (Some(critical_round), None) => Some(critical_round),
-            (None, None) => None,
-        }?;
+        let critical_has_payload = !self.critical_digests.is_empty();
+        let intermediate_has_payload = !self.intermediate_digests.is_empty();
+        let critical_include_payload = critical_has_payload && critical_payload_trigger;
+        let intermediate_include_payload =
+            intermediate_has_payload && intermediate_payload_trigger;
+        let critical_eligible = critical_round.is_some()
+            && (proposal_timer_expired || critical_payload_trigger);
+        let intermediate_eligible = intermediate_round.is_some()
+            && (proposal_timer_expired || intermediate_payload_trigger);
 
-        let include_payload = match self.round_class(selected_round) {
-            RoundClass::Critical => has_payload,
-            RoundClass::Intermediate => false,
-            RoundClass::Bootstrap => false,
-        };
-
-        Some(ProposalDecision {
-            round: selected_round,
-            include_payload,
-        })
+        match (critical_round, intermediate_round) {
+            (Some(critical_round), Some(intermediate_round)) => {
+                if critical_include_payload {
+                    Some(ProposalDecision {
+                        round: critical_round,
+                        include_payload: true,
+                    })
+                } else if intermediate_eligible {
+                    Some(ProposalDecision {
+                        round: intermediate_round,
+                        include_payload: intermediate_include_payload,
+                    })
+                } else if critical_eligible {
+                    Some(ProposalDecision {
+                        round: critical_round,
+                        include_payload: false,
+                    })
+                } else {
+                    None
+                }
+            }
+            (Some(critical_round), None) if critical_eligible => Some(ProposalDecision {
+                round: critical_round,
+                include_payload: critical_include_payload,
+            }),
+            (None, Some(intermediate_round)) if intermediate_eligible => Some(ProposalDecision {
+                round: intermediate_round,
+                include_payload: intermediate_include_payload,
+            }),
+            _ => None,
+        }
     }
 
-    fn take_payload_for_header(&mut self) -> BTreeMap<Digest, WorkerId> {
-        self.payload_size = 0;
-        self.digests.drain(..).collect()
+    fn payload_queue_for_worker(&self, worker_id: WorkerId) -> RoundClass {
+        if self.local_workers <= 1 {
+            RoundClass::Critical
+        } else if worker_id % 2 == 0 {
+            RoundClass::Intermediate
+        } else {
+            RoundClass::Critical
+        }
+    }
+
+    fn take_payload_for_round_class(
+        &mut self,
+        round_class: RoundClass,
+    ) -> BTreeMap<Digest, WorkerId> {
+        match round_class {
+            RoundClass::Critical => {
+                self.critical_payload_size = 0;
+                self.critical_digests.drain(..).collect()
+            }
+            RoundClass::Intermediate => {
+                self.intermediate_payload_size = 0;
+                self.intermediate_digests.drain(..).collect()
+            }
+            RoundClass::Bootstrap => BTreeMap::new(),
+        }
     }
 
     async fn make_header(
@@ -381,7 +451,7 @@ impl Proposer {
     ) {
         // Make a new header.
         let payload = if include_payload {
-            self.take_payload_for_header()
+            self.take_payload_for_round_class(self.round_class(round))
         } else {
             BTreeMap::new()
         };
@@ -466,25 +536,44 @@ impl Proposer {
     pub async fn run(&mut self) {
         debug!("Dag starting with bootstrap round 1 unlocked");
 
-        let mut payload_deadline = Instant::now() + Duration::from_millis(self.max_header_delay);
-        let timer = sleep_until(payload_deadline);
+        let mut proposal_deadline = Instant::now() + Duration::from_millis(self.max_header_delay);
+        let mut critical_payload_deadline: Option<Instant> = None;
+        let mut intermediate_payload_deadline: Option<Instant> = None;
+        let timer = sleep_until(proposal_deadline);
         tokio::pin!(timer);
 
         loop {
-            let enough_digests = self.payload_size >= self.header_size;
-            let timer_expired = Instant::now() >= payload_deadline;
-            if let Some(decision) = self.next_proposal_round(timer_expired, enough_digests) {
+            let now = Instant::now();
+            let proposal_timer_expired = now >= proposal_deadline;
+            let critical_enough_digests = self.critical_payload_size >= self.header_size;
+            let intermediate_enough_digests = self.intermediate_payload_size >= self.header_size;
+            let critical_payload_timer_expired =
+                critical_payload_deadline.is_some_and(|deadline| now >= deadline);
+            let intermediate_payload_timer_expired =
+                intermediate_payload_deadline.is_some_and(|deadline| now >= deadline);
+
+            if let Some(decision) = self.next_proposal_round(
+                proposal_timer_expired,
+                critical_payload_timer_expired,
+                critical_enough_digests,
+                intermediate_payload_timer_expired,
+                intermediate_enough_digests,
+            ) {
                 if decision.round != 1 {
                     debug!(
-                        "Proposing {:?} round {} (payload={}, timer_expired={}, enough_digests={})",
+                        "Proposing {:?} round {} (payload={}, proposal_timer_expired={}, critical_payload_timer_expired={}, critical_enough_digests={}, intermediate_payload_timer_expired={}, intermediate_enough_digests={})",
                         self.round_class(decision.round),
                         decision.round,
                         decision.include_payload,
-                        timer_expired,
-                        enough_digests
+                        proposal_timer_expired,
+                        critical_payload_timer_expired,
+                        critical_enough_digests,
+                        intermediate_payload_timer_expired,
+                        intermediate_enough_digests
                     );
                 }
 
+                let selected_class = self.round_class(decision.round);
                 let proposal_state = self
                     .unlocked_rounds
                     .remove(&decision.round)
@@ -495,12 +584,23 @@ impl Proposer {
                 if decision.include_payload && self.is_critical_round(decision.round) {
                     self.drop_obsolete_intermediate_rounds(decision.round);
                 }
-                payload_deadline = Instant::now() + Duration::from_millis(self.max_header_delay);
+                if decision.include_payload {
+                    match selected_class {
+                        RoundClass::Critical => critical_payload_deadline = None,
+                        RoundClass::Intermediate => intermediate_payload_deadline = None,
+                        RoundClass::Bootstrap => {}
+                    }
+                }
+                proposal_deadline = Instant::now() + Duration::from_millis(self.max_header_delay);
 
                 continue;
             }
 
-            let next_deadline = self.next_recheck_deadline(payload_deadline);
+            let next_deadline = self.next_recheck_deadline(
+                proposal_deadline,
+                critical_payload_deadline,
+                intermediate_payload_deadline,
+            );
             timer.as_mut().reset(next_deadline);
 
             tokio::select! {
@@ -509,8 +609,22 @@ impl Proposer {
                     self.unlock_round(proposal_round, parent_update);
                 }
                 Some((digest, worker_id)) = self.rx_workers.recv() => {
-                    self.payload_size += digest.size();
-                    self.digests.push_back((digest, worker_id));
+                    let queue = self.payload_queue_for_worker(worker_id);
+                    let payload_deadline =
+                        Instant::now() + Duration::from_millis(self.max_header_delay);
+                    match queue {
+                        RoundClass::Critical => {
+                            self.critical_payload_size += digest.size();
+                            self.critical_digests.push_back((digest, worker_id));
+                            critical_payload_deadline.get_or_insert(payload_deadline);
+                        }
+                        RoundClass::Intermediate => {
+                            self.intermediate_payload_size += digest.size();
+                            self.intermediate_digests.push_back((digest, worker_id));
+                            intermediate_payload_deadline.get_or_insert(payload_deadline);
+                        }
+                        RoundClass::Bootstrap => {}
+                    }
                 }
                 () = &mut timer => {
                     // Nothing to do.
