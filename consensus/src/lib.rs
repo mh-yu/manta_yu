@@ -41,6 +41,10 @@ struct State {
     certificate_index: HashMap<Digest, DagPosition>,
     /// Fast lookup for both certificate digests and header ids. Used by logging / visualization.
     digest_index: HashMap<Digest, DagPosition>,
+    /// Records rounds already checked by fast path to avoid duplicate checks/logs.
+    fast_path_checked_rounds: HashSet<Round>,
+    /// If set, fast path must not commit until normal path has committed up to this round.
+    fast_path_blocked_until_normal_round: Option<Round>,
 }
 
 impl State {
@@ -52,6 +56,8 @@ impl State {
             dag: HashMap::new(),
             certificate_index: HashMap::new(),
             digest_index: HashMap::new(),
+            fast_path_checked_rounds: HashSet::new(),
+            fast_path_blocked_until_normal_round: None,
         };
 
         for certificate in genesis {
@@ -148,6 +154,14 @@ impl State {
 
     fn update_last_committed_leader(&mut self, leader_round: Round) {
         self.last_committed_leader_round = max(self.last_committed_leader_round, leader_round);
+    }
+
+    fn maybe_unblock_fast_path(&mut self) {
+        if let Some(target_round) = self.fast_path_blocked_until_normal_round {
+            if self.last_committed_certificate_round >= target_round {
+                self.fast_path_blocked_until_normal_round = None;
+            }
+        }
     }
 
     fn set_commit_status(&mut self, certificate: &Certificate, status: CommitStatus) {
@@ -351,6 +365,7 @@ impl Consensus {
             }
             state.update_last_committed_leader(leader_round);
             state.cleanup_committed_history(self.gc_depth);
+            state.maybe_unblock_fast_path();
 
             for certificate in sequence {
                 let node_id = self.author_to_node_id(certificate.origin());
@@ -381,7 +396,11 @@ impl Consensus {
     }
 
     async fn fast_path(&self, round: Round, state: &mut State) {
+
         if round == 0 || round <= state.last_committed_certificate_round {
+            return;
+        }
+        if state.fast_path_checked_rounds.contains(&round) {
             return;
         }
         let Some(current_round_certificates) = state.dag.get(&round) else {
@@ -394,6 +413,22 @@ impl Consensus {
         {
             return;
         }
+        state.fast_path_checked_rounds.insert(round);
+
+        if let Some(target_round) = state.fast_path_blocked_until_normal_round {
+            if state.last_committed_certificate_round < target_round {
+                info!(
+                    "FAST_PATH_WAIT round={} blocked_until_normal_round={} last_committed_round={}",
+                    round,
+                    target_round,
+                    state.last_committed_certificate_round
+                );
+                return;
+            }
+            state.fast_path_blocked_until_normal_round = None;
+        }
+
+        info!("Checking fast path for round {}", round);
 
         let r = round - 1;
         let Some(previous_round_certificates) = state.dag.get(&r) else {
@@ -481,6 +516,20 @@ impl Consensus {
                     warn!("Failed to output certificate: {}", e);
                 }
             }
+        } else {
+            // Once this round is not fast-path-acceptable, defer subsequent fast-path commits
+            // until normal path catches up to the corresponding previous round.
+            let corresponding_round = r;
+            state.fast_path_blocked_until_normal_round = Some(
+                state
+                    .fast_path_blocked_until_normal_round
+                    .map_or(corresponding_round, |x| max(x, corresponding_round)),
+            );
+            info!(
+                "FAST_PATH_BLOCK round={} wait_normal_until_round={}",
+                round,
+                corresponding_round
+            );
         }
     }
 
