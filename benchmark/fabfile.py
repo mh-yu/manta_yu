@@ -251,10 +251,10 @@ def cloudlab_remote(
     kappa=2,
     reference=4,
     coverage=7,
-    allow_cross_step_weak_edges=False,
-    enable_fast_coin=False,
-    enable_commit_recheck=False,
-    design_tag='tusk_false_all',
+    allow_cross_step_weak_edges=True,
+    enable_fast_coin=true,
+    enable_commit_recheck=True,
+    design_tag='manta_true_all_tps',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)

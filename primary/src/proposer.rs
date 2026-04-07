@@ -356,9 +356,12 @@ impl Proposer {
             (None, None) => None,
         }?;
 
+        let include_payload =
+            has_payload && self.round_class(selected_round) == RoundClass::Critical;
+
         Some(ProposalDecision {
             round: selected_round,
-            include_payload: has_payload,
+            include_payload,
         })
     }
 
