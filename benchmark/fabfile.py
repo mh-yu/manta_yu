@@ -254,7 +254,7 @@ def cloudlab_remote(
     allow_cross_step_weak_edges=True,
     enable_fast_coin=True,
     enable_commit_recheck=True,
-    design_tag='manta_true_all_tps',
+    design_tag='manta_2_worker',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
@@ -263,14 +263,15 @@ def cloudlab_remote(
     bench_params = {
         'faults': 0,
         'nodes': [10],
-        'workers': 1,
+        'workers': 2,
         'collocate': True,
         'rate_type': 'balanced',
         # 'rate': [20000,40000,60000,80000,100000,120000,140000,160000,180000,200000],
-        'rate': [60000],
+        # 'rate': [60000,120000],
+        'rate': [40000,80000,120000,160000,200000,240000,280000,320000,360000,400000],
         'tx_size': 512,
-        'duration': 30,
-        'runs': 2,
+        'duration': 120,
+        'runs': 2,       
     }
     node_params = {
         'header_size': 1_000,  # bytes
