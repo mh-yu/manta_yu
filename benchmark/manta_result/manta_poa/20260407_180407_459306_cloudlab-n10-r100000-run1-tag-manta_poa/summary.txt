@@ -1,0 +1,38 @@
+
+-----------------------------------------
+ SUMMARY:
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 node(s)
+ Committee size: 10 node(s)
+ Worker(s) per node: 2 worker(s)
+ Collocate primary and workers: True
+ Input rate: 100,000 tx/s
+ Transaction size: 512 B
+ Execution time: 60 s
+
+ Header size: 1,000 B
+ Max header delay: 80 ms
+ GC depth: 50 round(s)
+ Sync retry delay: 1,000 ms
+ Sync retry nodes: 7 node(s)
+ batch size: 128,000 B
+ Max batch delay: 35 ms
+ Sigma: 2
+ Kappa: 2
+ Reference: 4
+ Coverage: 7
+ Allow cross-step weak edges: True
+ Enable fast coin: True
+ Enable commit recheck: True
+ Design tag: manta_poa
+
+ + RESULTS:
+ Consensus TPS: 69,801 tx/s
+ Consensus BPS: 35,738,308 B/s
+ Consensus latency: 1,093 ms
+
+ End-to-end TPS: 69,254 tx/s
+ End-to-end BPS: 35,457,985 B/s
+ End-to-end latency: 2,236 ms
+-----------------------------------------
