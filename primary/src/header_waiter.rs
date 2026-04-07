@@ -25,7 +25,11 @@ const TIMER_RESOLUTION: u64 = 1_000;
 /// The commands that can be sent to the `Waiter`.
 #[derive(Debug)]
 pub enum WaiterMessage {
-    SyncBatches(HashMap<Digest, WorkerId>, Header),
+    SyncBatches {
+        missing: HashMap<Digest, WorkerId>,
+        header: Header,
+        wait: bool,
+    },
     SyncParents(Vec<Digest>, Header),
 }
 
@@ -128,7 +132,7 @@ impl HeaderWaiter {
             tokio::select! {
                 Some(message) = self.rx_synchronizer.recv() => {
                     match message {
-                        WaiterMessage::SyncBatches(missing, header) => {
+                        WaiterMessage::SyncBatches { missing, header, wait } => {
                             let header_id = header.id.clone();
                             let round = header.round;
                             let author = header.author;
@@ -140,30 +144,45 @@ impl HeaderWaiter {
                                 missing_count
                             );
 
-                            // Ensure we sync only once per header.
-                            if self.pending.contains_key(&header_id) {
-                                debug!(
-                                    "Header {} (round {}) already in pending, skipping duplicate sync request",
-                                    header_id,
-                                    round
-                                );
-                                continue;
-                            }
+                            if wait {
+                                // Ensure we sync only once per header.
+                                if self.pending.contains_key(&header_id) {
+                                    debug!(
+                                        "Header {} (round {}) already in pending, skipping duplicate sync request",
+                                        header_id,
+                                        round
+                                    );
+                                    continue;
+                                }
 
-                            // Add the header to the waiter pool. The waiter will return it to when all
-                            // its parents are in the store.
-                            let wait_for: Vec<(Vec<u8>, Store)> = missing
-                                .iter()
-                                .map(|(digest, worker_id)| {
-                                    let key = [digest.as_ref(), &worker_id.to_le_bytes()].concat();
-                                    (key.to_vec(), self.store.clone())
-                                })
-                                .collect();
-                            let wait_for_count = wait_for.len();
-                            let (tx_cancel, rx_cancel) = channel(1);
-                            self.pending.insert(header_id.clone(), (round, tx_cancel));
-                            let fut = Self::waiter(wait_for, header, rx_cancel);
-                            waiting.push(fut);
+                                // Add the header to the waiter pool. The waiter will return it to when all
+                                // its parents are in the store.
+                                let wait_for: Vec<(Vec<u8>, Store)> = missing
+                                    .iter()
+                                    .map(|(digest, worker_id)| {
+                                        let key = [digest.as_ref(), &worker_id.to_le_bytes()].concat();
+                                        (key.to_vec(), self.store.clone())
+                                    })
+                                    .collect();
+                                let wait_for_count = wait_for.len();
+                                let (tx_cancel, rx_cancel) = channel(1);
+                                self.pending.insert(header_id.clone(), (round, tx_cancel));
+                                let fut = Self::waiter(wait_for, header, rx_cancel);
+                                waiting.push(fut);
+                                debug!(
+                                    "Header {} (round {}) added to waiter pool, waiting for {} batch(es) to arrive",
+                                    header_id,
+                                    round,
+                                    wait_for_count
+                                );
+                            } else {
+                                debug!(
+                                    "Header {} (round {}) will keep processing while {} missing batch(es) are fetched in background",
+                                    header_id,
+                                    round,
+                                    missing_count
+                                );
+                            }
 
                             // Ensure we didn't already send a sync request for these parents.
                             let mut requires_sync = HashMap::new();
@@ -191,12 +210,6 @@ impl HeaderWaiter {
                                     .expect("Failed to serialize batch sync request");
                                 self.network.send(address, Bytes::from(bytes)).await;
                             }
-                            debug!(
-                                "Header {} (round {}) added to waiter pool, waiting for {} batch(es) to arrive",
-                                header_id,
-                                round,
-                                wait_for_count
-                            );
                         }
 
                         WaiterMessage::SyncParents(missing, header) => {

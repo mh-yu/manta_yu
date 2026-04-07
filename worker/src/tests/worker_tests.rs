@@ -1,13 +1,15 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use super::*;
-use crate::common::{batch_digest, committee_with_base_port, keys, listener, transaction};
+use crate::common::{
+    batch_digest, committee_with_base_port, keys, signed_batch_listener, transaction,
+    worker_primary_listener,
+};
 use network::SimpleSender;
-use primary::WorkerPrimaryMessage;
 use std::fs;
 
 #[tokio::test]
 async fn handle_clients_transactions() {
-    let (name, _) = keys().pop().unwrap();
+    let (name, secret) = keys().pop().unwrap();
     let id = 0;
     let committee = committee_with_base_port(11_000);
     let parameters = Parameters {
@@ -21,17 +23,25 @@ async fn handle_clients_transactions() {
     let store = Store::new(path).unwrap();
 
     // Spawn a `Worker` instance.
-    Worker::spawn(name, id, committee.clone(), parameters, store);
+    Worker::spawn(name, secret, id, committee.clone(), parameters, store);
 
     // Spawn a network listener to receive our batch's digest.
     let primary_address = committee.primary(&name).unwrap().worker_to_primary;
-    let expected = bincode::serialize(&WorkerPrimaryMessage::OurBatch(batch_digest(), id)).unwrap();
-    let handle = listener(primary_address, Some(Bytes::from(expected)));
+    let handle = worker_primary_listener(
+        primary_address,
+        batch_digest(),
+        id,
+        committee.validity_threshold() as usize,
+    );
 
     // Spawn enough workers' listeners to acknowledge our batches.
-    for (_, addresses) in committee.others_workers(&name, &id) {
+    for (worker_name, addresses) in committee.others_workers(&name, &id) {
         let address = addresses.worker_to_worker;
-        let _ = listener(address, /* expected */ None);
+        let (_, secret) = keys()
+            .into_iter()
+            .find(|(public_key, _)| public_key == &worker_name)
+            .unwrap();
+        let _ = signed_batch_listener(address, /* expected */ None, worker_name, secret);
     }
 
     // Send enough transactions to create a batch.

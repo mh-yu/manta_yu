@@ -1,6 +1,7 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use super::*;
 use crate::common::{committee, keys};
+use crate::primary::WorkerBatchMessage;
 use std::fs;
 use tokio::sync::mpsc::channel;
 
@@ -47,7 +48,7 @@ async fn propose_payload() {
         .unwrap()
         .digest();
     let (_tx_parents, rx_parents) = channel::<(ProposalParents, Round)>(1);
-    let (_tx_our_digests, rx_our_digests) = channel::<(Digest, WorkerId)>(1);
+    let (_tx_our_digests, rx_our_digests) = channel::<WorkerBatchMessage>(1);
     let (tx_headers, _rx_headers) = channel::<Header>(1);
 
     let mut unlocked_rounds = HashMap::new();
@@ -90,6 +91,7 @@ async fn propose_payload() {
         intermediate_payload_size: 0,
         critical_digests: VecDeque::from(vec![(digest, 0)]),
         critical_payload_size: 32,
+        poa_certificates: HashMap::new(),
         solid_step_length: committee.solid_step_length(),
         solid_wave_length: committee.solid_wave_length(),
         parent_grace_delay: Duration::from_millis(0),
@@ -113,7 +115,7 @@ async fn intermediate_round_still_proposes_empty_with_single_worker() {
         .unwrap()
         .digest();
     let (tx_parents, rx_parents) = channel::<(ProposalParents, Round)>(1);
-    let (tx_our_digests, rx_our_digests) = channel::<(Digest, WorkerId)>(1);
+    let (tx_our_digests, rx_our_digests) = channel::<WorkerBatchMessage>(1);
     let (tx_headers, _rx_headers) = channel::<Header>(1);
 
     drop(tx_parents);
@@ -148,6 +150,7 @@ async fn intermediate_round_still_proposes_empty_with_single_worker() {
         intermediate_payload_size: 0,
         critical_digests: VecDeque::from(vec![(Digest(name.0), 0)]),
         critical_payload_size: 32,
+        poa_certificates: HashMap::new(),
         solid_step_length: committee.solid_step_length(),
         solid_wave_length: committee.solid_wave_length(),
         parent_grace_delay: Duration::from_millis(0),
@@ -171,7 +174,7 @@ async fn intermediate_round_uses_payload_from_dedicated_queue() {
         .unwrap()
         .digest();
     let (tx_parents, rx_parents) = channel::<(ProposalParents, Round)>(1);
-    let (tx_our_digests, rx_our_digests) = channel::<(Digest, WorkerId)>(1);
+    let (tx_our_digests, rx_our_digests) = channel::<WorkerBatchMessage>(1);
     let (tx_headers, _rx_headers) = channel::<Header>(1);
 
     drop(tx_parents);
@@ -206,6 +209,7 @@ async fn intermediate_round_uses_payload_from_dedicated_queue() {
         intermediate_payload_size: 32,
         critical_digests: VecDeque::from(vec![(Digest([2; 32]), 1)]),
         critical_payload_size: 32,
+        poa_certificates: HashMap::new(),
         solid_step_length: committee.solid_step_length(),
         solid_wave_length: committee.solid_wave_length(),
         parent_grace_delay: Duration::from_millis(0),

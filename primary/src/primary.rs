@@ -12,7 +12,7 @@ use crate::synchronizer::Synchronizer;
 use async_trait::async_trait;
 use bytes::Bytes;
 use config::{Committee, KeyPair, Parameters, WorkerId};
-use crypto::{Digest, PublicKey, SignatureService};
+use crypto::{Digest, PublicKey, Signature, SignatureService};
 use futures::sink::SinkExt as _;
 use log::info;
 use network::{MessageHandler, Receiver as NetworkReceiver, Writer};
@@ -46,11 +46,24 @@ pub enum PrimaryWorkerMessage {
     Cleanup(Round),
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct PoaCertificate {
+    pub digest: Digest,
+    pub acknowledgements: Vec<(PublicKey, Signature)>,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkerBatchMessage {
+    pub digest: Digest,
+    pub worker_id: WorkerId,
+    pub poa: Option<PoaCertificate>,
+}
+
 /// The messages sent by the workers to their primary.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum WorkerPrimaryMessage {
     /// The worker indicates it sealed a new batch.
-    OurBatch(Digest, WorkerId),
+    OurBatch(Digest, WorkerId, Option<PoaCertificate>),
     /// The worker indicates it received a batch's digest from another authority.
     OthersBatch(Digest, WorkerId),
 }
@@ -247,8 +260,8 @@ impl MessageHandler for PrimaryReceiverHandler {
 /// Defines how the network receiver handles incoming workers messages.
 #[derive(Clone)]
 struct WorkerReceiverHandler {
-    tx_our_digests: Sender<(Digest, WorkerId)>,
-    tx_others_digests: Sender<(Digest, WorkerId)>,
+    tx_our_digests: Sender<WorkerBatchMessage>,
+    tx_others_digests: Sender<WorkerBatchMessage>,
 }
 
 #[async_trait]
@@ -260,14 +273,22 @@ impl MessageHandler for WorkerReceiverHandler {
     ) -> Result<(), Box<dyn Error>> {
         // Deserialize and parse the message.
         match bincode::deserialize(&serialized).map_err(DagError::SerializationError)? {
-            WorkerPrimaryMessage::OurBatch(digest, worker_id) => self
+            WorkerPrimaryMessage::OurBatch(digest, worker_id, poa) => self
                 .tx_our_digests
-                .send((digest, worker_id))
+                .send(WorkerBatchMessage {
+                    digest,
+                    worker_id,
+                    poa,
+                })
                 .await
                 .expect("Failed to send workers' digests"),
             WorkerPrimaryMessage::OthersBatch(digest, worker_id) => self
                 .tx_others_digests
-                .send((digest, worker_id))
+                .send(WorkerBatchMessage {
+                    digest,
+                    worker_id,
+                    poa: None,
+                })
                 .await
                 .expect("Failed to send workers' digests"),
         }

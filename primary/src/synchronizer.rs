@@ -10,6 +10,10 @@ use std::collections::HashMap;
 use store::Store;
 use tokio::sync::mpsc::Sender;
 
+#[cfg(test)]
+#[path = "tests/synchronizer_tests.rs"]
+pub mod synchronizer_tests;
+
 /// The `Synchronizer` checks if we have all batches and parents referenced by a header. If we don't, it sends
 /// a command to the `Waiter` to request the missing data.
 pub struct Synchronizer {
@@ -49,9 +53,9 @@ impl Synchronizer {
         }
     }
 
-    /// Returns `true` if we have all transactions of the payload. If we don't, we return false,
-    /// synchronize with other nodes (through our workers), and re-schedule processing of the
-    /// header for when we will have its complete payload.
+    /// Returns `true` when header processing must pause for missing payload. If some batches are
+    /// missing, we always trigger synchronization through our workers; when every missing digest
+    /// carries a valid POA, syncing continues in the background and the header may keep moving.
     pub async fn missing_payload(&mut self, header: &Header) -> DagResult<bool> {
         // We don't store the payload of our own workers.
         if header.author == self.name {
@@ -81,11 +85,26 @@ impl Synchronizer {
             return Ok(false);
         }
 
+        let wait = missing
+            .keys()
+            .any(|digest| !header.payload_poas.contains_key(digest));
+
         self.tx_header_waiter
-            .send(WaiterMessage::SyncBatches(missing, header.clone()))
+            .send(WaiterMessage::SyncBatches {
+                missing,
+                header: header.clone(),
+                wait,
+            })
             .await
             .expect("Failed to send sync batch request");
-        Ok(true)
+        if !wait {
+            debug!(
+                "Header {} (round {}) continues with POA-backed missing payload; syncing batches in background",
+                header.id,
+                header.round
+            );
+        }
+        Ok(wait)
     }
 
     /// Returns the parents of a header if we have them all. If at least one parent is missing,

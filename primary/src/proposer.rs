@@ -1,6 +1,6 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::messages::{Certificate, Header, ProposalParents};
-use crate::primary::Round;
+use crate::primary::{PoaCertificate, Round, WorkerBatchMessage};
 use config::{Committee, WorkerId};
 use crypto::Hash as _;
 use crypto::{Digest, PublicKey, SignatureService};
@@ -31,7 +31,7 @@ pub struct Proposer {
     /// Receives the parents to include in the next header (along with their round number).
     rx_core: Receiver<(ProposalParents, Round)>,
     /// Receives the batches' digests from our workers.
-    rx_workers: Receiver<(Digest, WorkerId)>,
+    rx_workers: Receiver<WorkerBatchMessage>,
     /// Sends newly created headers to the `Core`.
     tx_core: Sender<Header>,
     /// Number of local workers attached to this primary.
@@ -51,6 +51,8 @@ pub struct Proposer {
     critical_digests: VecDeque<(Digest, WorkerId)>,
     /// Total size of digests reserved for critical rounds.
     critical_payload_size: usize,
+    /// POA metadata received alongside local worker batches.
+    poa_certificates: HashMap<Digest, PoaCertificate>,
     /// The solid step length.
     solid_step_length: u64,
     /// The solid wave length.
@@ -89,7 +91,7 @@ impl Proposer {
         header_size: usize,
         max_header_delay: u64,
         rx_core: Receiver<(ProposalParents, Round)>,
-        rx_workers: Receiver<(Digest, WorkerId)>,
+        rx_workers: Receiver<WorkerBatchMessage>,
         tx_core: Sender<Header>,
         _store: store::Store,
     ) {
@@ -141,6 +143,7 @@ impl Proposer {
                 intermediate_payload_size: 0,
                 critical_digests: VecDeque::with_capacity(2 * header_size),
                 critical_payload_size: 0,
+                poa_certificates: HashMap::new(),
                 solid_step_length,
                 solid_wave_length,
                 parent_grace_delay: Duration::from_millis(parent_grace_delay_ms),
@@ -443,6 +446,20 @@ impl Proposer {
         }
     }
 
+    fn take_poa_for_payload(
+        &mut self,
+        payload: &BTreeMap<Digest, WorkerId>,
+    ) -> BTreeMap<Digest, PoaCertificate> {
+        payload
+            .keys()
+            .filter_map(|digest| {
+                self.poa_certificates
+                    .remove(digest)
+                    .map(|poa| (digest.clone(), poa))
+            })
+            .collect()
+    }
+
     async fn make_header(
         &mut self,
         round: Round,
@@ -455,10 +472,12 @@ impl Proposer {
         } else {
             BTreeMap::new()
         };
+        let payload_poas = self.take_poa_for_payload(&payload);
         let mut header = Header::new(
             self.name,
             round,
             payload,
+            payload_poas,
             unlocked_round.parents.iter().cloned().collect(),
             &mut self.signature_service,
         )
@@ -608,7 +627,10 @@ impl Proposer {
                     let proposal_round = round + 1;
                     self.unlock_round(proposal_round, parent_update);
                 }
-                Some((digest, worker_id)) = self.rx_workers.recv() => {
+                Some(WorkerBatchMessage { digest, worker_id, poa }) = self.rx_workers.recv() => {
+                    if let Some(poa) = poa {
+                        self.poa_certificates.insert(digest.clone(), poa);
+                    }
                     let queue = self.payload_queue_for_worker(worker_id);
                     let payload_deadline =
                         Instant::now() + Duration::from_millis(self.max_header_delay);

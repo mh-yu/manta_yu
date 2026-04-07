@@ -2,7 +2,7 @@
 use crate::worker::SerializedBatchDigestMessage;
 use config::WorkerId;
 use crypto::Digest;
-use primary::WorkerPrimaryMessage;
+use primary::{PoaCertificate, WorkerPrimaryMessage};
 use store::Store;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -14,10 +14,11 @@ pub mod processor_tests;
 pub type SerializedBatchMessage = Vec<u8>;
 
 /// Represents a batch that has already been sealed and hashed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct SealedBatch {
     pub digest: Digest,
     pub serialized_batch: SerializedBatchMessage,
+    pub poa: Option<PoaCertificate>,
 }
 
 /// Stores batches and outputs their precomputed digest.
@@ -40,6 +41,7 @@ impl Processor {
             while let Some(SealedBatch {
                 digest,
                 serialized_batch,
+                poa,
             }) = rx_batch.recv().await
             {
                 // Store the batch.
@@ -47,7 +49,7 @@ impl Processor {
 
                 // Deliver the batch's digest.
                 let message = match own_digest {
-                    true => WorkerPrimaryMessage::OurBatch(digest, id),
+                    true => WorkerPrimaryMessage::OurBatch(digest, id, poa),
                     false => WorkerPrimaryMessage::OthersBatch(digest, id),
                 };
                 let message = bincode::serialize(&message)

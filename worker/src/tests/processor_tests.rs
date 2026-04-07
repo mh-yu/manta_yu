@@ -2,6 +2,8 @@
 use super::*;
 use crate::common::batch;
 use crate::worker::WorkerMessage;
+use ed25519_dalek::{Digest as _, Sha512};
+use std::convert::TryInto;
 use std::fs;
 use tokio::sync::mpsc::channel;
 
@@ -28,16 +30,24 @@ async fn hash_and_store() {
     // Send a batch to the `Processor`.
     let message = WorkerMessage::Batch(batch());
     let serialized = bincode::serialize(&message).unwrap();
-    tx_batch.send(serialized.clone()).await.unwrap();
-
-    // Ensure the `Processor` outputs the batch's digest.
-    let output = rx_digest.recv().await.unwrap();
     let digest = Digest(
         Sha512::digest(&serialized).as_slice()[..32]
             .try_into()
             .unwrap(),
     );
-    let expected = bincode::serialize(&WorkerPrimaryMessage::OurBatch(digest.clone(), id)).unwrap();
+    tx_batch
+        .send(SealedBatch {
+            digest: digest.clone(),
+            serialized_batch: serialized.clone(),
+            poa: None,
+        })
+        .await
+        .unwrap();
+
+    // Ensure the `Processor` outputs the batch's digest.
+    let output = rx_digest.recv().await.unwrap();
+    let expected =
+        bincode::serialize(&WorkerPrimaryMessage::OurBatch(digest.clone(), id, None)).unwrap();
     assert_eq!(output, expected);
 
     // Ensure the `Processor` correctly stored the batch.

@@ -3,9 +3,49 @@ use super::*;
 use crate::common::{
     certificate, committee, committee_with_base_port, header, headers, keys, listener, votes,
 };
+use crate::primary::PoaCertificate;
+use crypto::Signature;
 use futures::future::try_join_all;
 use std::fs;
 use tokio::sync::mpsc::channel;
+use tokio::time::{timeout, Duration};
+
+fn header_with_payload_poa() -> Header {
+    let committee = committee();
+    let (author, secret) = keys().pop().unwrap();
+    let digest = Digest::default();
+    let acknowledgements = keys()
+        .into_iter()
+        .take(committee.validity_threshold() as usize)
+        .map(|(name, secret)| (name, Signature::new(&digest, &secret)))
+        .collect();
+
+    let header = Header {
+        author,
+        round: 1,
+        payload: [(digest.clone(), 0)].iter().cloned().collect(),
+        payload_poas: [(
+            digest.clone(),
+            PoaCertificate {
+                digest,
+                acknowledgements,
+            },
+        )]
+        .iter()
+        .cloned()
+        .collect(),
+        parents: Certificate::genesis(&committee)
+            .iter()
+            .map(|x| x.digest())
+            .collect(),
+        ..Header::default()
+    };
+    Header {
+        id: header.digest(),
+        signature: Signature::new(&header.digest(), &secret),
+        ..header
+    }
+}
 
 #[tokio::test]
 async fn process_header() {
@@ -206,6 +246,65 @@ async fn process_header_missing_payload() {
 
     // Ensure the header is not stored.
     assert!(store.read(id.to_vec()).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn process_header_missing_payload_with_poa() {
+    let mut keypairs = keys();
+    let _ = keypairs.pop().unwrap(); // Skip the header author.
+    let (name, secret) = keypairs.pop().unwrap();
+    let signature_service = SignatureService::new(secret);
+
+    let (tx_sync_headers, _rx_sync_headers) = channel(1);
+    let (tx_sync_certificates, _rx_sync_certificates) = channel(1);
+    let (tx_primary_messages, rx_primary_messages) = channel(1);
+    let (_tx_headers_loopback, rx_headers_loopback) = channel(1);
+    let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
+    let (_tx_headers, rx_headers) = channel(1);
+    let (tx_consensus, _rx_consensus) = channel(1);
+    let (tx_parents, _rx_parents) = channel(1);
+
+    let path = ".db_test_process_header_missing_payload_with_poa";
+    let _ = fs::remove_dir_all(path);
+    let mut store = Store::new(path).unwrap();
+
+    let synchronizer = Synchronizer::new(
+        name,
+        &committee(),
+        store.clone(),
+        /* tx_header_waiter */ tx_sync_headers,
+        /* tx_certificate_waiter */ tx_sync_certificates,
+    );
+
+    Core::spawn(
+        name,
+        committee(),
+        store.clone(),
+        synchronizer,
+        signature_service,
+        /* consensus_round */ Arc::new(AtomicU64::new(0)),
+        /* gc_depth */ 50,
+        /* rx_primaries */ rx_primary_messages,
+        /* rx_header_waiter */ rx_headers_loopback,
+        /* rx_certificate_waiter */ rx_certificates_loopback,
+        /* rx_proposer */ rx_headers,
+        tx_consensus,
+        /* tx_proposer */ tx_parents,
+    );
+
+    let header = header_with_payload_poa();
+    let id = header.id.clone();
+    tx_primary_messages
+        .send(PrimaryMessage::Header(header.clone()))
+        .await
+        .unwrap();
+
+    let stored = timeout(Duration::from_secs(1), store.notify_read(id.to_vec()))
+        .await
+        .expect("Header with POA should continue processing")
+        .unwrap();
+    let stored: Header = bincode::deserialize(&stored).unwrap();
+    assert_eq!(stored, header);
 }
 
 #[tokio::test]

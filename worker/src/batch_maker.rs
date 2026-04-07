@@ -1,16 +1,14 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::quorum_waiter::QuorumWaiterMessage;
+use crate::processor::SealedBatch;
 use crate::worker::WorkerMessage;
 use bytes::Bytes;
-#[cfg(feature = "benchmark")]
 use crypto::Digest;
 use crypto::PublicKey;
-#[cfg(feature = "benchmark")]
 use ed25519_dalek::{Digest as _, Sha512};
 #[cfg(feature = "benchmark")]
 use log::info;
 use network::ReliableSender;
-#[cfg(feature = "benchmark")]
 use std::convert::TryInto as _;
 use std::net::SocketAddr;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -117,16 +115,14 @@ impl BatchMaker {
         let batch: Vec<_> = self.current_batch.drain(..).collect();
         let message = WorkerMessage::Batch(batch);
         let serialized = bincode::serialize(&message).expect("Failed to serialize our own batch");
+        let digest = Digest(
+            Sha512::digest(&serialized).as_slice()[..32]
+                .try_into()
+                .unwrap(),
+        );
 
         #[cfg(feature = "benchmark")]
         {
-            // NOTE: This is one extra hash that is only needed to print the following log entries.
-            let digest = Digest(
-                Sha512::digest(&serialized).as_slice()[..32]
-                    .try_into()
-                    .unwrap(),
-            );
-
             for id in tx_ids {
                 // NOTE: This log entry is used to compute performance.
                 info!(
@@ -148,7 +144,11 @@ impl BatchMaker {
         // Send the batch through the deliver channel for further processing.
         self.tx_message
             .send(QuorumWaiterMessage {
-                batch: serialized,
+                batch: SealedBatch {
+                    digest,
+                    serialized_batch: serialized,
+                    poa: None,
+                },
                 handlers: names.into_iter().zip(handlers.into_iter()).collect(),
             })
             .await

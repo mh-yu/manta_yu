@@ -1,6 +1,7 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use super::*;
-use crate::common::{batch, committee_with_base_port, keys, listener};
+use crate::common::{batch, committee_with_base_port, keys, signed_batch_listener};
+use crate::processor::SealedBatch;
 use crate::worker::WorkerMessage;
 use bytes::Bytes;
 use futures::future::try_join_all;
@@ -15,11 +16,12 @@ async fn wait_for_quorum() {
     let committee = committee_with_base_port(7_000);
 
     // Spawn a `QuorumWaiter` instance.
-    QuorumWaiter::spawn(committee.clone(), /* stake */ 1, rx_message, tx_batch);
+    QuorumWaiter::spawn(committee.clone(), rx_message, tx_batch);
 
     // Make a batch.
     let message = WorkerMessage::Batch(batch());
     let serialized = bincode::serialize(&message).unwrap();
+    let digest = crate::common::batch_digest();
     let expected = Bytes::from(serialized.clone());
 
     // Spawn enough listeners to acknowledge our batches.
@@ -28,7 +30,11 @@ async fn wait_for_quorum() {
     let mut listener_handles = Vec::new();
     for (name, address) in committee.others_workers(&myself, /* id */ &0) {
         let address = address.worker_to_worker;
-        let handle = listener(address, Some(expected.clone()));
+        let (_, secret) = keys()
+            .into_iter()
+            .find(|(public_key, _)| public_key == &name)
+            .unwrap();
+        let handle = signed_batch_listener(address, Some(expected.clone()), name, secret);
         names.push(name);
         addresses.push(address);
         listener_handles.push(handle);
@@ -40,14 +46,24 @@ async fn wait_for_quorum() {
 
     // Forward the batch along with the handlers to the `QuorumWaiter`.
     let message = QuorumWaiterMessage {
-        batch: serialized.clone(),
+        batch: SealedBatch {
+            digest: digest.clone(),
+            serialized_batch: serialized.clone(),
+            poa: None,
+        },
         handlers: names.into_iter().zip(handlers.into_iter()).collect(),
     };
     tx_message.send(message).await.unwrap();
 
     // Wait for the `QuorumWaiter` to gather enough acknowledgements and output the batch.
     let output = rx_batch.recv().await.unwrap();
-    assert_eq!(output, serialized);
+    assert_eq!(output.serialized_batch, serialized);
+    let poa = output.poa.expect("Expected POA");
+    assert_eq!(poa.digest, digest);
+    assert_eq!(
+        poa.acknowledgements.len(),
+        committee.validity_threshold() as usize
+    );
 
     // Ensure the other listeners correctly received the batch.
     assert!(try_join_all(listener_handles).await.is_ok());

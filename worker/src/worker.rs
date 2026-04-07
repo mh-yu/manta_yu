@@ -2,18 +2,20 @@
 use crate::batch_maker::{Batch, BatchMaker, Transaction};
 use crate::helper::Helper;
 use crate::primary_connector::PrimaryConnector;
-use crate::processor::{Processor, SerializedBatchMessage};
+use crate::processor::{Processor, SealedBatch};
 use crate::quorum_waiter::QuorumWaiter;
 use crate::synchronizer::Synchronizer;
 use async_trait::async_trait;
 use bytes::Bytes;
 use config::{Committee, Parameters, WorkerId};
-use crypto::{Digest, PublicKey};
+use crypto::{Digest, PublicKey, SecretKey, Signature, SignatureService};
+use ed25519_dalek::{Digest as _, Sha512};
 use futures::sink::SinkExt as _;
 use log::{error, info, warn};
 use network::{MessageHandler, Receiver, Writer};
 use primary::PrimaryWorkerMessage;
 use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 use std::error::Error;
 use store::Store;
 use tokio::sync::mpsc::{channel, Sender};
@@ -39,6 +41,14 @@ pub enum WorkerMessage {
     BatchRequest(Vec<Digest>, /* origin */ PublicKey),
 }
 
+/// A signed acknowledgement that proves a worker received a batch.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SignedBatchAck {
+    pub digest: Digest,
+    pub author: PublicKey,
+    pub signature: Signature,
+}
+
 pub struct Worker {
     /// The public key of this authority.
     name: PublicKey,
@@ -55,6 +65,7 @@ pub struct Worker {
 impl Worker {
     pub fn spawn(
         name: PublicKey,
+        secret: SecretKey,
         id: WorkerId,
         committee: Committee,
         parameters: Parameters,
@@ -71,9 +82,10 @@ impl Worker {
 
         // Spawn all worker tasks.
         let (tx_primary, rx_primary) = channel(CHANNEL_CAPACITY);
+        let signature_service = SignatureService::new(secret);
         worker.handle_primary_messages();
         worker.handle_clients_transactions(tx_primary.clone());
-        worker.handle_workers_messages(tx_primary);
+        worker.handle_workers_messages(tx_primary, signature_service);
 
         // The `PrimaryConnector` allows the worker to send messages to its primary.
         PrimaryConnector::spawn(
@@ -168,11 +180,10 @@ impl Worker {
                 .collect(),
         );
 
-        // The `QuorumWaiter` waits for 2f authorities to acknowledge reception of the batch. It then forwards
+        // The `QuorumWaiter` waits for an f+1 POA worth of signed acknowledgements. It then forwards
         // the batch to the `Processor`.
         QuorumWaiter::spawn(
             self.committee.clone(),
-            /* stake */ self.committee.stake(&self.name),
             /* rx_message */ rx_quorum_waiter,
             /* tx_batch */ tx_processor,
         );
@@ -194,7 +205,11 @@ impl Worker {
     }
 
     /// Spawn all tasks responsible to handle messages from other workers.
-    fn handle_workers_messages(&self, tx_primary: Sender<SerializedBatchDigestMessage>) {
+    fn handle_workers_messages(
+        &self,
+        tx_primary: Sender<SerializedBatchDigestMessage>,
+        signature_service: SignatureService,
+    ) {
         let (tx_helper, rx_helper) = channel(CHANNEL_CAPACITY);
         let (tx_processor, rx_processor) = channel(CHANNEL_CAPACITY);
 
@@ -209,6 +224,8 @@ impl Worker {
             address,
             /* handler */
             WorkerReceiverHandler {
+                name: self.name,
+                signature_service,
                 tx_helper,
                 tx_processor,
             },
@@ -263,28 +280,49 @@ impl MessageHandler for TxReceiverHandler {
 /// Defines how the network receiver handles incoming workers messages.
 #[derive(Clone)]
 struct WorkerReceiverHandler {
+    name: PublicKey,
+    signature_service: SignatureService,
     tx_helper: Sender<(Vec<Digest>, PublicKey)>,
-    tx_processor: Sender<SerializedBatchMessage>,
+    tx_processor: Sender<SealedBatch>,
 }
 
 #[async_trait]
 impl MessageHandler for WorkerReceiverHandler {
     async fn dispatch(&self, writer: &mut Writer, serialized: Bytes) -> Result<(), Box<dyn Error>> {
-        // Reply with an ACK.
-        let _ = writer.send(Bytes::from("Ack")).await;
-
         // Deserialize and parse the message.
         match bincode::deserialize(&serialized) {
-            Ok(WorkerMessage::Batch(..)) => self
-                .tx_processor
-                .send(serialized.to_vec())
-                .await
-                .expect("Failed to send batch"),
-            Ok(WorkerMessage::BatchRequest(missing, requestor)) => self
-                .tx_helper
-                .send((missing, requestor))
-                .await
-                .expect("Failed to send batch request"),
+            Ok(WorkerMessage::Batch(..)) => {
+                let digest = Digest(
+                    Sha512::digest(&serialized).as_slice()[..32]
+                        .try_into()
+                        .expect("Unexpected digest length"),
+                );
+                let mut signature_service = self.signature_service.clone();
+                let ack = SignedBatchAck {
+                    digest: digest.clone(),
+                    author: self.name,
+                    signature: signature_service.request_signature(digest.clone()).await,
+                };
+                let ack =
+                    bincode::serialize(&ack).expect("Failed to serialize signed batch ack");
+                let _ = writer.send(Bytes::from(ack)).await;
+
+                self.tx_processor
+                    .send(SealedBatch {
+                        digest,
+                        serialized_batch: serialized.to_vec(),
+                        poa: None,
+                    })
+                    .await
+                    .expect("Failed to send batch");
+            }
+            Ok(WorkerMessage::BatchRequest(missing, requestor)) => {
+                let _ = writer.send(Bytes::from("Ack")).await;
+                self.tx_helper
+                    .send((missing, requestor))
+                    .await
+                    .expect("Failed to send batch request")
+            }
             Err(e) => warn!("Serialization error: {}", e),
         }
         Ok(())

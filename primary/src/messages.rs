@@ -1,6 +1,6 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::error::{DagError, DagResult};
-use crate::primary::Round;
+use crate::primary::{PoaCertificate, Round};
 use config::{Committee, WorkerId};
 use crypto::{Digest, Hash, PublicKey, Signature, SignatureService};
 use ed25519_dalek::Digest as _;
@@ -15,6 +15,7 @@ pub struct Header {
     pub author: PublicKey,
     pub round: Round,
     pub payload: BTreeMap<Digest, WorkerId>,
+    pub payload_poas: BTreeMap<Digest, PoaCertificate>,
     pub parents: BTreeSet<Digest>,
     pub id: Digest,
     pub signature: Signature,
@@ -35,6 +36,7 @@ impl Header {
         author: PublicKey,
         round: Round,
         payload: BTreeMap<Digest, WorkerId>,
+        payload_poas: BTreeMap<Digest, PoaCertificate>,
         parents: BTreeSet<Digest>,
         signature_service: &mut SignatureService,
     ) -> Self {
@@ -42,6 +44,7 @@ impl Header {
             author,
             round,
             payload,
+            payload_poas,
             parents,
             id: Digest::default(),
             signature: Signature::default(),
@@ -72,6 +75,27 @@ impl Header {
             committee
                 .worker(&self.author, &worker_id)
                 .map_err(|_| DagError::MalformedHeader(self.id.clone()))?;
+        }
+        for (digest, poa) in &self.payload_poas {
+            ensure!(
+                self.payload.contains_key(digest) && poa.digest == *digest,
+                DagError::MalformedHeader(self.id.clone())
+            );
+
+            let mut used = HashSet::new();
+            let mut weight = 0;
+            for (author, _) in &poa.acknowledgements {
+                ensure!(used.insert(*author), DagError::AuthorityReuse(*author));
+                let voting_rights = committee.stake(author);
+                ensure!(voting_rights > 0, DagError::UnknownAuthority(*author));
+                weight += voting_rights;
+            }
+            ensure!(
+                weight >= committee.validity_threshold(),
+                DagError::MalformedHeader(self.id.clone())
+            );
+            Signature::verify_batch(&poa.digest, poa.acknowledgements.iter())
+                .map_err(DagError::from)?;
         }
 
         // Check the signature.
@@ -122,6 +146,17 @@ impl Hash for Header {
         for (x, y) in &self.payload {
             hasher.update(x);
             hasher.update(y.to_le_bytes());
+        }
+        for (digest, poa) in &self.payload_poas {
+            hasher.update(digest);
+            hasher.update(&poa.digest);
+            for (author, signature) in &poa.acknowledgements {
+                hasher.update(author);
+                hasher.update(
+                    bincode::serialize(signature)
+                        .expect("Failed to serialize POA signature while hashing header"),
+                );
+            }
         }
         for x in &self.parents {
             hasher.update(x);

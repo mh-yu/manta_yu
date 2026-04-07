@@ -1,9 +1,11 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::batch_maker::{Batch, Transaction};
+use crate::worker::SignedBatchAck;
 use crate::worker::WorkerMessage;
 use bytes::Bytes;
 use config::{Authority, Committee, PrimaryAddresses, WorkerAddresses};
-use crypto::{generate_keypair, Digest, PublicKey, SecretKey};
+use crypto::{generate_keypair, Digest, PublicKey, SecretKey, Signature};
+use primary::WorkerPrimaryMessage;
 use ed25519_dalek::Digest as _;
 use ed25519_dalek::Sha512;
 use futures::sink::SinkExt as _;
@@ -130,6 +132,71 @@ pub fn listener(address: SocketAddr, expected: Option<Bytes>) -> JoinHandle<()> 
                 }
             }
             _ => panic!("Failed to receive network message"),
+        }
+    })
+}
+
+// Fixture
+pub fn signed_batch_listener(
+    address: SocketAddr,
+    expected: Option<Bytes>,
+    author: PublicKey,
+    secret: SecretKey,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let listener = TcpListener::bind(&address).await.unwrap();
+        let (socket, _) = listener.accept().await.unwrap();
+        let transport = Framed::new(socket, LengthDelimitedCodec::new());
+        let (mut writer, mut reader) = transport.split();
+        match reader.next().await {
+            Some(Ok(received)) => {
+                let digest = Digest(
+                    Sha512::digest(received.as_ref()).as_slice()[..32]
+                        .try_into()
+                        .unwrap(),
+                );
+                let ack = SignedBatchAck {
+                    digest: digest.clone(),
+                    author,
+                    signature: Signature::new(&digest, &secret),
+                };
+                let ack = bincode::serialize(&ack).unwrap();
+                writer.send(Bytes::from(ack)).await.unwrap();
+                if let Some(expected) = expected {
+                    assert_eq!(received.freeze(), expected);
+                }
+            }
+            _ => panic!("Failed to receive network message"),
+        }
+    })
+}
+
+// Fixture
+pub fn worker_primary_listener(
+    address: SocketAddr,
+    expected_digest: Digest,
+    expected_worker_id: u32,
+    expected_ack_count: usize,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let listener = TcpListener::bind(&address).await.unwrap();
+        let (socket, _) = listener.accept().await.unwrap();
+        let transport = Framed::new(socket, LengthDelimitedCodec::new());
+        let (_writer, mut reader) = transport.split();
+        match reader.next().await {
+            Some(Ok(received)) => {
+                let message: WorkerPrimaryMessage = bincode::deserialize(&received).unwrap();
+                match message {
+                    WorkerPrimaryMessage::OurBatch(digest, worker_id, Some(poa)) => {
+                        assert_eq!(digest, expected_digest);
+                        assert_eq!(worker_id, expected_worker_id);
+                        assert_eq!(poa.digest, expected_digest);
+                        assert_eq!(poa.acknowledgements.len(), expected_ack_count);
+                    }
+                    other => panic!("Unexpected worker-primary message: {:?}", other),
+                }
+            }
+            _ => panic!("Failed to receive worker-primary message"),
         }
     })
 }
