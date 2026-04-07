@@ -437,7 +437,7 @@ impl Consensus {
         // if there are not bivalent certificates in this round? Fast Path!
         if bivalent.is_empty() {
             // commit one-valent certificates
-            Info!("Start Fast Path for Round {}", round);
+            info!("Start Fast Path for Round {}", round);
             let to_commit = self.collect_fast_path_commits(&one_valent, &state);
 
             for certificate in to_commit {
