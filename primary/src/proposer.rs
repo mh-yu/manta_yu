@@ -356,8 +356,11 @@ impl Proposer {
             (None, None) => None,
         }?;
 
-        let include_payload =
-            has_payload && self.round_class(selected_round) == RoundClass::Critical;
+        let include_payload = match self.round_class(selected_round) {
+            RoundClass::Critical => has_payload,
+            RoundClass::Intermediate => self.payload_size > self.header_size,
+            RoundClass::Bootstrap => false,
+        };
 
         Some(ProposalDecision {
             round: selected_round,
@@ -365,9 +368,21 @@ impl Proposer {
         })
     }
 
-    fn take_payload_for_header(&mut self) -> BTreeMap<Digest, WorkerId> {
-        self.payload_size = 0;
-        self.digests.drain(..).collect()
+    fn take_payload_for_header(&mut self, reserve_bytes: usize) -> BTreeMap<Digest, WorkerId> {
+        if reserve_bytes == 0 {
+            self.payload_size = 0;
+            return self.digests.drain(..).collect();
+        }
+
+        let mut payload = BTreeMap::new();
+        while self.payload_size > reserve_bytes {
+            let Some((digest, worker_id)) = self.digests.pop_front() else {
+                break;
+            };
+            self.payload_size = self.payload_size.saturating_sub(digest.size());
+            payload.insert(digest, worker_id);
+        }
+        payload
     }
 
     async fn make_header(
@@ -378,7 +393,12 @@ impl Proposer {
     ) {
         // Make a new header.
         let payload = if include_payload {
-            self.take_payload_for_header()
+            let reserve_bytes = match self.round_class(round) {
+                RoundClass::Critical => 0,
+                RoundClass::Intermediate => self.header_size,
+                RoundClass::Bootstrap => 0,
+            };
+            self.take_payload_for_header(reserve_bytes)
         } else {
             BTreeMap::new()
         };
