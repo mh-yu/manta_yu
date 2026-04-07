@@ -171,28 +171,50 @@ class LogParser:
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))
         return datetime.timestamp(x)
 
+    def _committed_batch_ids(self, require_proposal=False):
+        batch_ids = list(self.sizes.keys())
+        if require_proposal:
+            batch_ids = [digest for digest in batch_ids if digest in self.proposals]
+        return batch_ids
+
     def _consensus_throughput(self):
-        if not self.commits:
+        batch_ids = self._committed_batch_ids(require_proposal=True)
+        if not batch_ids:
             return 0, 0, 0
-        start, end = min(self.proposals.values()), max(self.commits.values())
-        duration = end - start
-        bytes = sum(self.sizes.values())
+        # Only use batches for which we observed proposal, commit, and size.
+        # This avoids stretching the consensus window with proposals unrelated
+        # to the bytes counted in the throughput numerator.
+        start = min(self.proposals[digest] for digest in batch_ids)
+        end = max(self.commits[digest] for digest in batch_ids)
+        duration = max(end - start, 1e-9)
+        bytes = sum(self.sizes[digest] for digest in batch_ids)
         bps = bytes / duration
         tps = bps / self.size[0]
         return tps, bps, duration
 
     def _consensus_latency(self):
-        latency = [c - self.proposals[d] for d, c in self.commits.items()]
+        latency = [
+            self.commits[digest] - self.proposals[digest]
+            for digest in self._committed_batch_ids(require_proposal=True)
+        ]
         return mean(latency) if latency else 0
 
     def _end_to_end_throughput(self):
-        if not self.commits:
+        batch_ids = self._committed_batch_ids()
+        if not batch_ids:
             return 0, 0, 0
         start_candidates = [x for x in self.start if x is not None]
-        start = min(start_candidates) if start_candidates else min(self.proposals.values())
-        end = max(self.commits.values())
-        duration = end - start
-        bytes = sum(self.sizes.values())
+        if start_candidates:
+            start = min(start_candidates)
+        else:
+            proposal_batch_ids = self._committed_batch_ids(require_proposal=True)
+            if proposal_batch_ids:
+                start = min(self.proposals[digest] for digest in proposal_batch_ids)
+            else:
+                start = min(self.commits[digest] for digest in batch_ids)
+        end = max(self.commits[digest] for digest in batch_ids)
+        duration = max(end - start, 1e-9)
+        bytes = sum(self.sizes[digest] for digest in batch_ids)
         bps = bytes / duration
         tps = bps / self.size[0]
         return tps, bps, duration
