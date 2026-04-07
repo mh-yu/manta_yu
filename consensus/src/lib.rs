@@ -381,7 +381,7 @@ impl Consensus {
     }
 
     async fn fast_path(&self, round: Round, state: &mut State) {
-        if round == 0 && round <= self.last_committed_certificate_round {
+        if round == 0 || round <= state.last_committed_certificate_round {
             return;
         }
         let Some(current_round_certificates) = state.dag.get(&round) else {
@@ -434,14 +434,36 @@ impl Consensus {
             state.set_commit_status(certificate, CommitStatus::Bivalent);
         }
 
-        // if there are not bivalent certificates in this round? Fast Path!
-        info!("Start Fast Path for Round {}, Bivalent length: {}, Zerovalent: {}, Onevalent: {}", round, bivalent.len(), zero_valent.len(), one_valent.len());
+        // if there are no bivalent certificates in this round, fast path can commit.
+        info!(
+            "FAST_PATH_CHECK round={} bivalent={} zerovalent={} onevalent={}",
+            round,
+            bivalent.len(),
+            zero_valent.len(),
+            one_valent.len()
+        );
 
         if bivalent.is_empty() {
-            // commit one-valent certificates
+            // Commit one-valent certificates and their reachable ancestors.
             let to_commit = self.collect_fast_path_commits(&one_valent, &state);
+            let mut committed = Vec::new();
 
             for certificate in to_commit {
+                state.record_commit(&certificate);
+                committed.push(certificate);
+            }
+
+            // Keep fast-path behavior consistent with normal path: clean old DAG state.
+            state.cleanup_committed_history(self.gc_depth);
+
+            for certificate in committed {
+                let node_id = self.author_to_node_id(certificate.origin());
+                info!(
+                    "DAG_COMMITTED path=fast round={} node={} digest={:?}",
+                    certificate.round(),
+                    node_id,
+                    certificate.digest()
+                );
                 #[cfg(not(feature = "benchmark"))]
                 info!("Committed {}", certificate.header);
 
@@ -450,7 +472,6 @@ impl Consensus {
                     info!("Committed {} -> {:?}", certificate.header, digest);
                 }
 
-                state.record_commit(&certificate);
                 self.tx_primary
                     .send(certificate.clone())
                     .await
@@ -573,6 +594,16 @@ impl Consensus {
 
         let mut buffer = vec![leader];
         while let Some(x) = buffer.pop() {
+            let x_digest = x.digest();
+            let already_committed = state
+                .last_committed
+                .get(&x.origin())
+                .map_or(false, |r| *r >= x.round());
+            if already_ordered.contains(&x_digest) || already_committed {
+                continue;
+            }
+            already_ordered.insert(x_digest);
+
             debug!("Sequencing {:?}", x);
             ordered.push(x.clone());
             for parent in &x.header.parents {
@@ -592,10 +623,9 @@ impl Consensus {
                 skip |= state
                     .last_committed
                     .get(&certificate.origin())
-                    .map_or_else(|| false, |r| r == &certificate.round());
+                    .map_or(false, |r| *r >= certificate.round());
                 if !skip {
                     buffer.push(certificate);
-                    already_ordered.insert(digest.clone());
                 }
             }
         }
