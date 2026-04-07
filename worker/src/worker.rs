@@ -164,9 +164,9 @@ impl Worker {
             /* handler */ TxReceiverHandler { tx_batch_maker },
         );
 
-        // The transactions are sent to the `BatchMaker` that assembles them into batches. It then broadcasts
-        // (in a reliable manner) the batches to all other workers that share the same `id` as us. Finally, it
-        // gathers the 'cancel handlers' of the messages and send them to the `QuorumWaiter`.
+        // The transactions are sent to the `BatchMaker` that assembles them into batches. It then sends the
+        // full batch to a rotating f+1 stake subset of the workers that share the same `id` as us. Finally,
+        // it gathers the 'cancel handlers' of the messages and send them to the `QuorumWaiter`.
         BatchMaker::spawn(
             self.parameters.batch_size,
             self.parameters.max_batch_delay,
@@ -176,8 +176,15 @@ impl Worker {
             self.committee
                 .others_workers(&self.name, &self.id)
                 .iter()
-                .map(|(name, addresses)| (*name, addresses.worker_to_worker))
+                .map(|(name, addresses)| {
+                    (
+                        *name,
+                        self.committee.stake(name),
+                        addresses.worker_to_worker,
+                    )
+                })
                 .collect(),
+            self.committee.validity_threshold(),
         );
 
         // The `QuorumWaiter` waits for an f+1 POA worth of signed acknowledgements. It then forwards

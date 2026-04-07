@@ -3,6 +3,7 @@ use crate::quorum_waiter::QuorumWaiterMessage;
 use crate::processor::SealedBatch;
 use crate::worker::WorkerMessage;
 use bytes::Bytes;
+use config::Stake;
 use crypto::Digest;
 use crypto::PublicKey;
 use ed25519_dalek::{Digest as _, Sha512};
@@ -31,14 +32,18 @@ pub struct BatchMaker {
     rx_transaction: Receiver<Transaction>,
     /// Output channel to deliver sealed batches to the `QuorumWaiter`.
     tx_message: Sender<QuorumWaiterMessage>,
-    /// The network addresses of the other workers that share our worker id.
-    workers_addresses: Vec<(PublicKey, SocketAddr)>,
+    /// The peer workers that may receive the full batch, along with their stake.
+    workers_addresses: Vec<(PublicKey, Stake, SocketAddr)>,
+    /// The stake threshold of peers that should receive the full batch upfront.
+    availability_threshold: Stake,
     /// Holds the current batch.
     current_batch: Batch,
     /// Holds the size of the current batch (in bytes).
     current_batch_size: usize,
     /// A network sender to broadcast the batches to the other workers.
     network: ReliableSender,
+    /// Rotates the initial peer used for full-batch dissemination to avoid hot-spotting.
+    next_broadcast_index: usize,
 }
 
 impl BatchMaker {
@@ -47,7 +52,8 @@ impl BatchMaker {
         max_batch_delay: u64,
         rx_transaction: Receiver<Transaction>,
         tx_message: Sender<QuorumWaiterMessage>,
-        workers_addresses: Vec<(PublicKey, SocketAddr)>,
+        workers_addresses: Vec<(PublicKey, Stake, SocketAddr)>,
+        availability_threshold: Stake,
     ) {
         tokio::spawn(async move {
             Self {
@@ -56,13 +62,40 @@ impl BatchMaker {
                 rx_transaction,
                 tx_message,
                 workers_addresses,
+                availability_threshold,
                 current_batch: Batch::with_capacity(batch_size * 2),
                 current_batch_size: 0,
                 network: ReliableSender::new(),
+                next_broadcast_index: 0,
             }
             .run()
             .await;
         });
+    }
+
+    fn select_workers_for_broadcast(
+        workers_addresses: &[(PublicKey, Stake, SocketAddr)],
+        availability_threshold: Stake,
+        start_index: usize,
+    ) -> (Vec<(PublicKey, SocketAddr)>, usize) {
+        if workers_addresses.is_empty() {
+            return (Vec::new(), start_index);
+        }
+
+        let mut selected = Vec::new();
+        let mut total_stake = 0;
+        let mut index = start_index % workers_addresses.len();
+        let mut visited = 0;
+
+        while visited < workers_addresses.len() && total_stake < availability_threshold {
+            let (name, stake, address) = workers_addresses[index];
+            selected.push((name, address));
+            total_stake += stake;
+            index = (index + 1) % workers_addresses.len();
+            visited += 1;
+        }
+
+        (selected, index)
     }
 
     /// Main loop receiving incoming transactions and creating batches.
@@ -136,8 +169,14 @@ impl BatchMaker {
             info!("Batch {:?} contains {} B", digest, size);
         }
 
-        // Broadcast the batch through the network.
-        let (names, addresses): (Vec<_>, _) = self.workers_addresses.iter().cloned().unzip();
+        // Disseminate the full batch only to a rotating availability quorum subset.
+        let (selected_workers, next_broadcast_index) = Self::select_workers_for_broadcast(
+            &self.workers_addresses,
+            self.availability_threshold,
+            self.next_broadcast_index,
+        );
+        self.next_broadcast_index = next_broadcast_index;
+        let (names, addresses): (Vec<_>, _) = selected_workers.into_iter().unzip();
         let bytes = Bytes::from(serialized.clone());
         let handlers = self.network.broadcast(addresses, bytes).await;
 
