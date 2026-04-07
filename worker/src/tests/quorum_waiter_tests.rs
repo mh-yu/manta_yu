@@ -6,6 +6,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use network::ReliableSender;
 use tokio::sync::mpsc::channel;
+use tokio::time::{timeout, Duration};
 
 #[tokio::test]
 async fn wait_for_quorum() {
@@ -54,7 +55,7 @@ async fn wait_for_quorum() {
 }
 
 #[tokio::test]
-async fn wait_for_availability_quorum() {
+async fn wait_for_full_quorum() {
     let (tx_message, rx_message) = channel(1);
     let (tx_batch, mut rx_batch) = channel(1);
     let (myself, _) = keys().pop().unwrap();
@@ -68,17 +69,14 @@ async fn wait_for_availability_quorum() {
     let serialized = bincode::serialize(&message).unwrap();
     let expected = Bytes::from(serialized.clone());
 
-    // With 4 equally weighted authorities, our own stake plus one acknowledgement
-    // reaches the availability threshold (f+1).
-    let (name, addresses) = committee
-        .others_workers(&myself, /* id */ &0)
-        .into_iter()
-        .next()
-        .unwrap();
+    // Spawn only one listener. With 4 equally weighted authorities, our own stake plus one
+    // acknowledgement only reaches f+1 and must not release the batch.
+    let mut peers = committee.others_workers(&myself, /* id */ &0).into_iter();
+    let (name, addresses) = peers.next().unwrap();
     let address = addresses.worker_to_worker;
     let listener_handle = listener(address, Some(expected.clone()));
 
-    // Broadcast the batch to a single availability peer.
+    // Broadcast the batch to a single peer.
     let bytes = Bytes::from(serialized.clone());
     let handler = ReliableSender::new().send(address, bytes).await;
 
@@ -89,9 +87,8 @@ async fn wait_for_availability_quorum() {
     };
     tx_message.send(message).await.unwrap();
 
-    // Wait for the `QuorumWaiter` to gather enough acknowledgements and output the batch.
-    let output = rx_batch.recv().await.unwrap();
-    assert_eq!(output, serialized);
+    // A single acknowledgement is not enough to release the batch.
+    assert!(timeout(Duration::from_millis(200), rx_batch.recv()).await.is_err());
 
     // Ensure the listener correctly received the batch.
     listener_handle.await.unwrap();

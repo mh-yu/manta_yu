@@ -19,7 +19,7 @@ pub struct QuorumWaiterMessage {
     pub handlers: Vec<(PublicKey, CancelHandler)>,
 }
 
-/// The QuorumWaiter waits for an availability quorum of acknowledgements.
+/// The QuorumWaiter waits for a full quorum of acknowledgements.
 pub struct QuorumWaiter {
     /// The committee information.
     committee: Committee,
@@ -68,21 +68,21 @@ impl QuorumWaiter {
                 })
                 .collect();
 
-            // Wait for the first f+1 stake worth of acknowledgements. Once a batch is available
-            // on an availability quorum, we can let it enter the DAG without waiting for a full
-            // quorum of worker confirmations.
+            // Wait for a full quorum of worker acknowledgements before forwarding the batch to the
+            // primary. Releasing batches on only f+1 replicas causes most primaries to miss the
+            // payload and stall on payload synchronization under load.
             let mut total_stake = self.stake;
-            let availability_threshold = self.committee.validity_threshold();
-            if total_stake >= availability_threshold {
-                self.tx_batch
-                    .send(batch)
-                    .await
-                    .expect("Failed to deliver batch");
-                continue;
-            }
+            let quorum_threshold = self.committee.quorum_threshold();
+            // if total_stake >= quorum_threshold {
+            //     self.tx_batch
+            //         .send(batch)
+            //         .await
+            //         .expect("Failed to deliver batch");
+            //     continue;
+            // }
             while let Some(stake) = wait_for_quorum.next().await {
                 total_stake += stake;
-                if total_stake >= availability_threshold {
+                if total_stake >= quorum_threshold {
                     self.tx_batch
                         .send(batch)
                         .await

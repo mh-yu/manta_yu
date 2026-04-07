@@ -270,8 +270,8 @@ def cloudlab_remote(
         # 'rate': [60000,120000],
         'rate': [150000],
         'tx_size': 512,
-        'duration': 60,
-        'runs': 2,       
+        'duration': 20,
+        'runs': 1,       
     }
     node_params = {
         'header_size': 1_000,  # bytes
