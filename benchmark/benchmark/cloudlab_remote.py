@@ -1568,7 +1568,10 @@ SCRIPTEOF'''
                                 run_label += f'-tag-{design_tag}'
                             if trigger_attack is not None:
                                 run_label += f'-attack-{"on" if trigger_attack else "off"}'
-                            run_dir = PathMaker.create_run_directory(run_label)
+                            run_dir = PathMaker.create_run_directory(
+                                run_label,
+                                design_tag=design_tag,
+                            )
                             PathMaker.update_run_metadata(
                                 {
                                     'benchmark_type': 'cloudlab',
@@ -1586,7 +1589,16 @@ SCRIPTEOF'''
                                     'node_params': {
                                         key: value
                                         for key, value in node_parameters.json.items()
-                                        if key in ('sigma', 'kappa', 'reference', 'coverage', 'design_tag')
+                                        if key in (
+                                            'sigma',
+                                            'kappa',
+                                            'reference',
+                                            'coverage',
+                                            'allow_cross_step_weak_edges',
+                                            'enable_fast_coin',
+                                            'enable_commit_recheck',
+                                            'design_tag',
+                                        )
                                     },
                                 },
                                 run_dir=run_dir,

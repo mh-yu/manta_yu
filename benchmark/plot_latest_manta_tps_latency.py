@@ -28,18 +28,15 @@ def parse_int(text: str, label: str) -> int:
 
 def load_rows() -> list[dict[str, int | str]]:
     rows: list[dict[str, int | str]] = []
-    for entry in sorted(RESULT_DIR.iterdir()):
-        if not entry.is_dir() or not entry.name.startswith("2026"):
-            continue
-
-        summary_path = entry / "summary.txt"
-        if not summary_path.exists():
+    for summary_path in sorted(RESULT_DIR.rglob("summary.txt")):
+        entry = summary_path.parent
+        if "plots" in summary_path.parts:
             continue
 
         text = summary_path.read_text()
         rows.append(
             {
-                "name": entry.name,
+                "name": str(entry.relative_to(RESULT_DIR)),
                 "input_rate": parse_int(text, "Input rate"),
                 "consensus_tps": parse_int(text, "Consensus TPS"),
                 "consensus_latency": parse_int(text, "Consensus latency"),

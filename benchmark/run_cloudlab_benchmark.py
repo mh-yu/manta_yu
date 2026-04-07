@@ -203,7 +203,10 @@ Examples:
         if current_run:
             PathMaker.activate_run_directory(current_run)
         else:
-            run_dir = PathMaker.create_run_directory('cloudlab-manual')
+            run_dir = PathMaker.create_run_directory(
+                'cloudlab-manual',
+                design_tag=args.design_tag,
+            )
             Print.info(f'Run outputs directory: {run_dir}')
     
     # Step 1: Run benchmark (unless skipped)

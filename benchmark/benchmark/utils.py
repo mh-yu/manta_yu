@@ -136,6 +136,14 @@ class PathMaker:
         return 'manta_result'
 
     @staticmethod
+    def design_tag_results_path(design_tag=None):
+        if design_tag is None:
+            return PathMaker.base_results_path()
+
+        safe_tag = PathMaker._sanitize_label(str(design_tag))
+        return join(PathMaker.base_results_path(), safe_tag)
+
+    @staticmethod
     def latest_run_file():
         return join(PathMaker.base_results_path(), PathMaker.LATEST_RUN_FILE)
 
@@ -209,10 +217,10 @@ class PathMaker:
         return label.strip('-') or 'run'
 
     @staticmethod
-    def create_run_directory(label='run'):
+    def create_run_directory(label='run', design_tag=None):
         safe_label = PathMaker._sanitize_label(label)
         timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
-        base_dir = PathMaker.base_results_path()
+        base_dir = PathMaker.design_tag_results_path(design_tag)
         os.makedirs(base_dir, exist_ok=True)
 
         run_dir = join(base_dir, f'{timestamp}_{safe_label}')
@@ -227,6 +235,9 @@ class PathMaker:
                 'created_at_utc': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
                 'label': safe_label,
                 'run_dir': run_dir,
+                'design_tag': PathMaker._sanitize_label(str(design_tag))
+                if design_tag is not None
+                else None,
             },
             run_dir=run_dir,
         )
@@ -237,6 +248,7 @@ class PathMaker:
         patterns = [
             join(PathMaker.base_results_path(), 'bench-*.txt'),
             join(PathMaker.base_results_path(), '*', 'bench-*.txt'),
+            join(PathMaker.base_results_path(), '*', '*', 'bench-*.txt'),
         ]
         files = []
         for pattern in patterns:
@@ -245,19 +257,10 @@ class PathMaker:
 
     @staticmethod
     def export_run_artifacts():
-        artifacts = {}
-        final_dag = PathMaker.export_final_dag()
-        if final_dag:
-            artifacts['final_dag'] = final_dag
-
-        solid_step_csv = PathMaker.export_solid_step_vertices_csv()
-        if solid_step_csv:
-            artifacts['solid_step_vertices_csv'] = solid_step_csv
-
-        annotated = PathMaker.export_annotated_dag_artifacts(final_dag_file=final_dag)
-        artifacts.update(annotated)
-
-        return artifacts
+        # DAG-related exports are useful for debugging, but they re-scan large
+        # primary logs and noticeably slow down benchmark post-processing.
+        # Keep them disabled by default during parameter sweeps.
+        return {}
 
     @staticmethod
     def export_final_dag(log_files=None, output_file=None):

@@ -39,6 +39,7 @@ class LocalBench:
                 'enable_commit_recheck',
                 True,
             )
+            self.design_tag = node_parameters_dict.get('design_tag')
         except ConfigError as e:
             raise BenchError('Invalid nodes or bench parameters', e)
 
@@ -90,7 +91,10 @@ class LocalBench:
         try:
             Print.info('Setting up testbed...')
             nodes, rate, rate_type = self.nodes[0], self.rate[0], self.rate_type
-            run_dir = PathMaker.create_run_directory(f'local-n{nodes}-r{rate}')
+            run_dir = PathMaker.create_run_directory(
+                f'local-n{nodes}-r{rate}',
+                design_tag=self.design_tag,
+            )
             Print.info(f'Run outputs directory: {run_dir}')
 
             # Cleanup all files.

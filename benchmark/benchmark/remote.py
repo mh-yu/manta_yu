@@ -357,7 +357,8 @@ class Bench:
                     Print.heading(f'Run {i+1}/{bench_parameters.runs}')
                     try:
                         run_dir = PathMaker.create_run_directory(
-                            f'remote-n{n}-r{r}-run{i+1}'
+                            f'remote-n{n}-r{r}-run{i+1}',
+                            design_tag=node_parameters.json.get('design_tag'),
                         )
                         Print.info(f'Run outputs directory: {run_dir}')
                         self._run_single(

@@ -247,14 +247,14 @@ def cloudlab_install(ctx):
 def cloudlab_remote(
     ctx,
     debug=False,
-    sigma=2,
+    sigma=1,
     kappa=2,
     reference=4,
     coverage=7,
-    allow_cross_step_weak_edges=True,
-    enable_fast_coin=True,
-    enable_commit_recheck=True,
-    design_tag='manta-max_delay_100_150-500k',
+    allow_cross_step_weak_edges=False,
+    enable_fast_coin=False,
+    enable_commit_recheck=False,
+    design_tag='tusk-like_50_50',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
@@ -270,16 +270,16 @@ def cloudlab_remote(
         'rate': [60000],
         'tx_size': 512,
         'duration': 90,
-        'runs': 1,
+        'runs': 2,
     }
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 100,  # ms
+        'max_header_delay': 50,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
         'batch_size': 500_000,  # bytes
-        'max_batch_delay': 150,  # ms
+        'max_batch_delay': 50,  # ms
         'sigma': sigma,
         'kappa': kappa,
         'reference': reference,
