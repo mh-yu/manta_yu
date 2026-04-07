@@ -518,8 +518,10 @@ impl Consensus {
             }
         } else {
             // Once this round is not fast-path-acceptable, defer subsequent fast-path commits
-            // until normal path catches up to the corresponding previous round.
-            let corresponding_round = r;
+            // until normal path catches up to the nearest wave-aligned round strictly greater than r.
+            // With wave_length=3, this is the nearest round in {3,6,9,...} and > r.
+            let wave = self.committee.solid_wave_length().max(1);
+            let corresponding_round = ((r / wave) + 1) * wave;
             state.fast_path_blocked_until_normal_round = Some(
                 state
                     .fast_path_blocked_until_normal_round
