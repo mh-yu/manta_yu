@@ -247,7 +247,7 @@ def cloudlab_install(ctx):
 def cloudlab_remote(
     ctx,
     debug=False,
-    sigma=1,
+    sigma=2,
     kappa=2,
     reference=4,
     coverage=7,

@@ -151,7 +151,7 @@ async fn intermediate_round_does_not_take_payload() {
 }
 
 #[tokio::test]
-async fn intermediate_round_takes_only_overflow_payload() {
+async fn intermediate_round_ignores_payload_even_with_overflow_available() {
     let committee = committee();
     let (name, secret) = keys().pop().unwrap();
     let signature_service = SignatureService::new(secret);
@@ -184,7 +184,7 @@ async fn intermediate_round_takes_only_overflow_payload() {
         (Digest([2; 32]), 0),
         (Digest([3; 32]), 0),
     ];
-    let mut proposer = Proposer {
+    let proposer = Proposer {
         name,
         node_id: None,
         signature_service,
@@ -205,13 +205,5 @@ async fn intermediate_round_takes_only_overflow_payload() {
 
     let decision = proposer.next_proposal_round(true, true).unwrap();
     assert_eq!(decision.round, 2);
-    assert!(decision.include_payload);
-
-    let payload = proposer.take_payload_for_header(32);
-    assert_eq!(payload.len(), 2);
-    assert!(payload.contains_key(&digests[0].0));
-    assert!(payload.contains_key(&digests[1].0));
-    assert_eq!(proposer.payload_size, 32);
-    assert_eq!(proposer.digests.len(), 1);
-    assert_eq!(proposer.digests.front(), Some(&digests[2]));
+    assert!(!decision.include_payload);
 }
