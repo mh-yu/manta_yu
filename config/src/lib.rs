@@ -203,6 +203,16 @@ impl Committee {
         self.authorities.get(&name).map_or_else(|| 0, |x| x.stake)
     }
 
+    /// Returns the deterministic bitmap index of an authority.
+    pub fn authority_index(&self, name: &PublicKey) -> Option<usize> {
+        self.authorities.keys().position(|authority| authority == name)
+    }
+
+    /// Returns the number of bytes required to store one bit per authority.
+    pub fn authority_bitmap_len(&self) -> usize {
+        (self.size() + 7) / 8
+    }
+
     /// Returns the stake of all authorities except `myself`.
     pub fn others_stake(&self, myself: &PublicKey) -> Vec<(PublicKey, Stake)> {
         self.authorities
@@ -360,6 +370,20 @@ impl Committee {
         } else {
             self.solid_step_parent_start(round)
         }
+    }
+
+    /// Returns the round whose authors should be tracked for indirect back-links
+    /// while building `round`.
+    pub fn wave_back_link_tracking_round(&self, round: u64) -> Option<u64> {
+        (round > 1).then(|| self.solid_wave_boundary_at_or_before(round - 1) + 1)
+    }
+
+    /// Returns the round whose reachable authors must satisfy the wave back-link
+    /// quorum when validating the provided solid-wave boundary round.
+    pub fn wave_back_link_target_round(&self, round: u64) -> Option<u64> {
+        self.is_solid_wave(round)
+            .then(|| self.wave_back_link_tracking_round(round))
+            .flatten()
     }
 
     /// Returns the solid-wave boundary at or before the provided round.

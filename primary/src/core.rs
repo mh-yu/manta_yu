@@ -1,12 +1,12 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::aggregators::{CertificatesAggregator, VotesAggregator};
 use crate::error::{DagError, DagResult};
-use crate::messages::{Certificate, Header, ProposalParents, Vote};
+use crate::messages::{author_bitmap_stake, merge_author_bitmaps, set_author_bit, Certificate, Header, ProposalParents, Vote};
 use crate::primary::{PrimaryMessage, Round};
 use crate::synchronizer::Synchronizer;
 use async_recursion::async_recursion;
 use bytes::Bytes;
-use config::{Committee, Stake};
+use config::Committee;
 use crypto::Hash as _;
 use crypto::{Digest, PublicKey, SignatureService};
 use log::{debug, error, warn};
@@ -76,84 +76,24 @@ impl Core {
             .position(|authority| authority == key)
     }
 
-    fn wave_back_link_target_round(&self, round: Round) -> Option<Round> {
-        if !self.committee.is_solid_wave(round) {
-            return None;
-        }
-
-        let regular_weak_start = self.committee.solid_step_parent_start(round);
-        (regular_weak_start > 1).then_some(regular_weak_start - 1)
-    }
-
-    async fn resolve_round_author(
-        &mut self,
-        digest: &Digest,
-    ) -> DagResult<Option<(Round, PublicKey)>> {
-        let Some(bytes) = self.store.read(digest.to_vec()).await? else {
-            return Ok(None);
+    fn wave_back_link_summary(&self, parents: &[Certificate], round: Round) -> (Round, Vec<u8>) {
+        let Some(target_round) = self.committee.wave_back_link_tracking_round(round) else {
+            return (0, Vec::new());
         };
 
-        if let Ok(certificate) = bincode::deserialize::<Certificate>(&bytes) {
-            return Ok(Some((certificate.round(), certificate.origin())));
-        }
-
-        if let Ok(header) = bincode::deserialize::<Header>(&bytes) {
-            return Ok(Some((header.round, header.author)));
-        }
-
-        Ok(None)
-    }
-
-    async fn wave_back_link_stake(
-        &mut self,
-        parents: &[Certificate],
-        round: Round,
-    ) -> DagResult<Stake> {
-        let Some(target_round) = self.wave_back_link_target_round(round) else {
-            return Ok(self.committee.quorum_threshold());
-        };
-
-        let mut reachable = HashSet::new();
+        let mut bitmap = vec![0; self.committee.authority_bitmap_len()];
         for parent in parents {
             if parent.round() == target_round {
-                reachable.insert(parent.origin());
-            }
-
-            let summary_vertices = if parent.header.solid_wave_vertices_merged.is_empty() {
-                &parent.header.solid_wave_vertices
-            } else {
-                &parent.header.solid_wave_vertices_merged
-            };
-
-            for digest in summary_vertices {
-                if let Some((resolved_round, author)) = self.resolve_round_author(digest).await? {
-                    if resolved_round == target_round {
-                        reachable.insert(author);
-                    }
+                if let Some(index) = self.committee.authority_index(&parent.origin()) {
+                    set_author_bit(&mut bitmap, index);
                 }
             }
-        }
-
-        Ok(reachable
-            .into_iter()
-            .map(|author| self.committee.stake(&author))
-            .sum())
-    }
-
-    async fn proposal_parents_certificates(
-        &mut self,
-        proposal_parents: &ProposalParents,
-    ) -> DagResult<Vec<Certificate>> {
-        let mut certificates = Vec::with_capacity(proposal_parents.parents.len());
-        for digest in &proposal_parents.parents {
-            let Some(bytes) = self.store.read(digest.to_vec()).await? else {
-                continue;
-            };
-            if let Ok(certificate) = bincode::deserialize::<Certificate>(&bytes) {
-                certificates.push(certificate);
+            if parent.header.wave_back_link_target_round == target_round {
+                merge_author_bitmaps(&mut bitmap, &parent.header.wave_back_link_author_bitmap);
             }
         }
-        Ok(certificates)
+
+        (target_round, bitmap)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -320,8 +260,16 @@ impl Core {
             );
         }
 
-        if let Some(target_round) = self.wave_back_link_target_round(round) {
-            let link_stake = self.wave_back_link_stake(&parents, round).await?;
+        let (expected_back_link_round, expected_back_link_bitmap) =
+            self.wave_back_link_summary(&parents, round);
+        ensure!(
+            header.wave_back_link_target_round == expected_back_link_round
+                && header.wave_back_link_author_bitmap == expected_back_link_bitmap,
+            DagError::MalformedHeader(header.id.clone())
+        );
+
+        if let Some(target_round) = self.committee.wave_back_link_target_round(round) {
+            let link_stake = author_bitmap_stake(&self.committee, &expected_back_link_bitmap);
             ensure!(
                 link_stake >= self.committee.quorum_threshold(),
                 DagError::HeaderRequiresWaveLink(header.id.clone(), target_round)
@@ -541,11 +489,20 @@ impl Core {
                 .append(certificate.clone(), &self.committee)?
             {
                 let proposal_round = target_round + 1;
-                let parent_certificates = self.proposal_parents_certificates(&parents).await?;
-                if let Some(back_link_round) = self.wave_back_link_target_round(proposal_round) {
-                    let link_stake = self
-                        .wave_back_link_stake(&parent_certificates, proposal_round)
-                        .await?;
+                if let Some(back_link_round) = self.committee.wave_back_link_target_round(proposal_round) {
+                    if parents.wave_back_link_target_round != back_link_round {
+                        debug!(
+                            "Delaying proposer unlock for round {}: parent bitmap tracks round {} instead of {}",
+                            proposal_round,
+                            parents.wave_back_link_target_round,
+                            back_link_round,
+                        );
+                        continue;
+                    }
+                    let link_stake = author_bitmap_stake(
+                        &self.committee,
+                        &parents.wave_back_link_author_bitmap,
+                    );
                     if link_stake < self.committee.quorum_threshold() {
                         debug!(
                             "Delaying proposer unlock for round {}: only {} stake links to round {} (need {})",

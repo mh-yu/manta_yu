@@ -1,5 +1,5 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
-use crate::messages::{Certificate, Header, ProposalParents};
+use crate::messages::{merge_author_bitmaps, Certificate, Header, ProposalParents};
 use crate::primary::Round;
 use config::{Committee, WorkerId};
 use crypto::Hash as _;
@@ -63,6 +63,8 @@ struct UnlockedRound {
     parents: Vec<Digest>,
     solid_step_union: HashSet<Digest>,
     solid_wave_union: HashSet<Digest>,
+    wave_back_link_target_round: Round,
+    wave_back_link_author_bitmap: Vec<u8>,
     ready_since: Instant,
     unlock_order: u64,
 }
@@ -118,6 +120,8 @@ impl Proposer {
                 parents: genesis,
                 solid_step_union: HashSet::new(),
                 solid_wave_union: HashSet::new(),
+                wave_back_link_target_round: 0,
+                wave_back_link_author_bitmap: Vec::new(),
                 ready_since: Instant::now(),
                 unlock_order: 0,
             },
@@ -165,6 +169,15 @@ impl Proposer {
         let (_old_len, _merged_len) = Self::merge_parents(&mut state.parents, update.parents);
         state.solid_step_union.extend(update.solid_step_union);
         state.solid_wave_union.extend(update.solid_wave_union);
+        if state.wave_back_link_target_round == 0 {
+            state.wave_back_link_target_round = update.wave_back_link_target_round;
+        }
+        if state.wave_back_link_target_round == update.wave_back_link_target_round {
+            merge_author_bitmaps(
+                &mut state.wave_back_link_author_bitmap,
+                &update.wave_back_link_author_bitmap,
+            );
+        }
         (
             state.solid_step_union.len().saturating_sub(solid_step_old_len),
             state.solid_wave_union.len().saturating_sub(solid_wave_old_len),
@@ -247,6 +260,8 @@ impl Proposer {
                         parents: parent_update.parents,
                         solid_step_union: parent_update.solid_step_union,
                         solid_wave_union: parent_update.solid_wave_union,
+                        wave_back_link_target_round: parent_update.wave_back_link_target_round,
+                        wave_back_link_author_bitmap: parent_update.wave_back_link_author_bitmap,
                         ready_since: Instant::now(),
                         unlock_order,
                     },
@@ -453,6 +468,10 @@ impl Proposer {
             header.store_solid_wave_vertex(unlocked_round.solid_wave_union.clone());
             header.store_solid_wave_merged_vertices(unlocked_round.solid_wave_union);
         }
+        header.store_wave_back_link_summary(
+            unlocked_round.wave_back_link_target_round,
+            unlocked_round.wave_back_link_author_bitmap,
+        );
         debug!(
             "Current round: {}, solid_step_vertices={}, solid_wave_vertices={}",
             round,
