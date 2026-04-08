@@ -22,6 +22,14 @@ fn default_enable_commit_recheck() -> bool {
     true
 }
 
+fn default_fast_coin_candidate_threshold() -> usize {
+    0
+}
+
+fn default_solid_candidate_threshold() -> usize {
+    0
+}
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("Node {0} is not in the committee")]
@@ -172,6 +180,14 @@ pub struct Committee {
     /// late support certificates for the same support round arrive.
     #[serde(default = "default_enable_commit_recheck")]
     pub enable_commit_recheck: bool,
+    /// Minimum number of leader-round vertices that must each gather f+1 support
+    /// on the fast-coin support round before the fast-coin path starts leader selection.
+    #[serde(default = "default_fast_coin_candidate_threshold")]
+    pub fast_coin_candidate_threshold: usize,
+    /// Minimum number of leader-round vertices that must each gather f+1 support
+    /// on the regular solid support round before the solid path starts leader selection.
+    #[serde(default = "default_solid_candidate_threshold")]
+    pub solid_candidate_threshold: usize,
 }
 
 impl Import for Committee {}
@@ -395,6 +411,8 @@ mod tests {
             allow_cross_step_weak_edges: true,
             enable_fast_coin: false,
             enable_commit_recheck: true,
+            fast_coin_candidate_threshold: 0,
+            solid_candidate_threshold: 0,
         }
     }
 

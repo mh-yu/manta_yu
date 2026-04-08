@@ -1,5 +1,5 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
-use config::Committee;
+use config::{Committee, Stake};
 use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
 use log::{debug, info, log_enabled, warn};
@@ -372,6 +372,64 @@ impl Consensus {
             .unwrap_or_default()
     }
 
+    fn activation_candidate_threshold(&self, path: CommitCheckPath) -> usize {
+        match path {
+            CommitCheckPath::FastCoin => self.committee.fast_coin_candidate_threshold,
+            CommitCheckPath::Solid => self.committee.solid_candidate_threshold,
+        }
+    }
+
+    fn support_round_total_stake(&self, state: &State, support_round: Round) -> Stake {
+        state
+            .dag
+            .get(&support_round)
+            .map(|support_round_map| {
+                support_round_map
+                    .values()
+                    .map(|(_, certificate)| self.committee.stake(&certificate.origin()))
+                    .sum()
+            })
+            .unwrap_or_default()
+    }
+
+    fn supported_candidate_count(
+        &self,
+        path: CommitCheckPath,
+        leader_round: Round,
+        support_round: Round,
+        state: &State,
+    ) -> usize {
+        let threshold = self.committee.validity_threshold();
+        let Some(leader_round_map) = state.dag.get(&leader_round) else {
+            return 0;
+        };
+        let Some(support_round_map) = state.dag.get(&support_round) else {
+            return 0;
+        };
+
+        leader_round_map
+            .values()
+            .filter(|(leader_digest, leader)| {
+                let leader_header_id = leader.header.id.clone();
+                let support_stake: Stake = support_round_map
+                    .values()
+                    .filter_map(|(_, certificate)| {
+                        let (supports, _, _) = self.certificate_supports_leader(
+                            path,
+                            certificate,
+                            &leader_header_id,
+                            leader_digest,
+                            leader,
+                            state,
+                        );
+                        supports.then(|| self.committee.stake(&certificate.origin()))
+                    })
+                    .sum();
+                support_stake >= threshold
+            })
+            .count()
+    }
+
     fn build_pending_commit_check(
         &self,
         path: CommitCheckPath,
@@ -492,6 +550,31 @@ impl Consensus {
         let path = pending.path;
         let leader_round = pending.leader_round;
         let support_round = pending.support_round;
+
+        let candidate_threshold = self.activation_candidate_threshold(path);
+        if candidate_threshold > 0 {
+            let support_round_stake = self.support_round_total_stake(state, support_round);
+            let validity_threshold = self.committee.validity_threshold();
+            let supported_candidates =
+                self.supported_candidate_count(path, leader_round, support_round, state);
+            if support_round_stake < validity_threshold || supported_candidates < candidate_threshold
+            {
+                debug!(
+                    "Commit activation gate blocked path={} leader_round={} support_round={} trigger_round={} support_stake={} validity_threshold={} supported_candidates={} candidate_threshold={}",
+                    path.log_label(),
+                    leader_round,
+                    support_round,
+                    trigger_round,
+                    support_round_stake,
+                    validity_threshold,
+                    supported_candidates,
+                    candidate_threshold,
+                );
+                pending.seen_support_certificate_digests =
+                    Self::support_certificate_digests(state, support_round);
+                return false;
+            }
+        }
 
         let (leader_digest, leader) = match self.leader(leader_round, &state.dag) {
             Some((digest, cert)) => (digest.clone(), cert.clone()),

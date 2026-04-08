@@ -978,6 +978,14 @@ class CloudLabBench:
             'enable_commit_recheck',
             True,
         )
+        fast_coin_candidate_threshold = node_parameters.json.get(
+            'fast_coin_candidate_threshold',
+            0,
+        )
+        solid_candidate_threshold = node_parameters.json.get(
+            'solid_candidate_threshold',
+            0,
+        )
         committee = Committee(
             addresses,
             self.settings.base_port,
@@ -988,6 +996,8 @@ class CloudLabBench:
             allow_cross_step_weak_edges,
             enable_fast_coin,
             enable_commit_recheck,
+            fast_coin_candidate_threshold,
+            solid_candidate_threshold,
         )
         committee.print(PathMaker.committee_file())
         

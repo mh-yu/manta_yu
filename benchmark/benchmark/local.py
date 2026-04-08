@@ -39,6 +39,14 @@ class LocalBench:
                 'enable_commit_recheck',
                 True,
             )
+            self.fast_coin_candidate_threshold = node_parameters_dict.get(
+                'fast_coin_candidate_threshold',
+                0,
+            )
+            self.solid_candidate_threshold = node_parameters_dict.get(
+                'solid_candidate_threshold',
+                0,
+            )
             self.design_tag = node_parameters_dict.get('design_tag')
         except ConfigError as e:
             raise BenchError('Invalid nodes or bench parameters', e)
@@ -130,6 +138,8 @@ class LocalBench:
                 self.allow_cross_step_weak_edges,
                 self.enable_fast_coin,
                 self.enable_commit_recheck,
+                self.fast_coin_candidate_threshold,
+                self.solid_candidate_threshold,
             )
             committee.print(PathMaker.committee_file())
 

@@ -188,6 +188,10 @@ Examples:
                        action='store_false',
                        help='Disable repeated pending commit checks for late support certificates')
     parser.set_defaults(enable_commit_recheck=True)
+    parser.add_argument('--fast-coin-candidate-threshold', type=int, default=0,
+                       help='Minimum number of leader-round vertices that must each gather f+1 support before fast coin starts leader selection')
+    parser.add_argument('--solid-candidate-threshold', type=int, default=0,
+                       help='Minimum number of leader-round vertices that must each gather f+1 support before the regular solid path starts leader selection')
     parser.add_argument('--design-tag', default='manta',
                        help='Design tag written to summary and run directory name (default: manta)')
     
@@ -222,6 +226,8 @@ Examples:
                 'allow_cross_step_weak_edges': args.allow_cross_step_weak_edges,
                 'enable_fast_coin': args.enable_fast_coin,
                 'enable_commit_recheck': args.enable_commit_recheck,
+                'fast_coin_candidate_threshold': args.fast_coin_candidate_threshold,
+                'solid_candidate_threshold': args.solid_candidate_threshold,
                 'design_tag': args.design_tag,
             },
         )

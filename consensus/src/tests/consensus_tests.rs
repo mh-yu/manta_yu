@@ -40,6 +40,8 @@ pub fn mock_committee() -> Committee {
         allow_cross_step_weak_edges: true,
         enable_fast_coin: false,
         enable_commit_recheck: true,
+        fast_coin_candidate_threshold: 0,
+        solid_candidate_threshold: 0,
     }
 }
 
@@ -692,6 +694,241 @@ async fn fast_coin_commits_via_parent_path_when_step_summary_missing() {
         committed,
         "fast coin should fall back to the parent path when the solid-step summary misses the leader"
     );
+
+    let committed_leader = rx_output.recv().await.unwrap();
+    assert_eq!(committed_leader.round(), 1);
+    assert_eq!(committed_leader.origin(), leader_author);
+}
+
+#[tokio::test]
+async fn fast_coin_candidate_threshold_delays_commit_until_enough_candidates() {
+    let committee = Committee {
+        enable_fast_coin: true,
+        fast_coin_candidate_threshold: 2,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let genesis_parents = genesis_certs
+        .iter()
+        .map(|certificate| certificate.digest())
+        .collect::<BTreeSet<_>>();
+
+    let leader_author = authorities[0];
+    let second_candidate_author = authorities[1];
+    let supporter_a = authorities[2];
+    let supporter_b = authorities[3];
+
+    let (_, mut leader_round_1) = mock_certificate(leader_author, 1, genesis_parents.clone());
+    leader_round_1.header.id = leader_round_1.header.digest();
+    let leader_header_id = leader_round_1.header.id.clone();
+    let (_, mut second_candidate_round_1) =
+        mock_certificate(second_candidate_author, 1, genesis_parents.clone());
+    second_candidate_round_1.header.id = second_candidate_round_1.header.digest();
+    let second_candidate_header_id = second_candidate_round_1.header.id.clone();
+
+    let mut leader_only = HashSet::new();
+    leader_only.insert(leader_header_id.clone());
+    let mut both_candidates = leader_only.clone();
+    both_candidates.insert(second_candidate_header_id);
+
+    let (_, support_round_2_a) = mock_certificate_with_solid_step(
+        supporter_a,
+        2,
+        BTreeSet::new(),
+        leader_only.clone(),
+    );
+    let (_, support_round_2_b) = mock_certificate_with_solid_step(
+        supporter_b,
+        2,
+        BTreeSet::new(),
+        leader_only,
+    );
+    let (_, late_support_round_2_c) = mock_certificate_with_solid_step(
+        leader_author,
+        2,
+        BTreeSet::new(),
+        both_candidates.clone(),
+    );
+    let (_, late_support_round_2_d) = mock_certificate_with_solid_step(
+        second_candidate_author,
+        2,
+        BTreeSet::new(),
+        both_candidates,
+    );
+    let (_, activation_round_3) =
+        mock_certificate(supporter_a, 3, BTreeSet::from([leader_round_1.digest()]));
+
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(10);
+    let (tx_output, mut rx_output) = channel(10);
+    let mut consensus = Consensus {
+        committee: committee.clone(),
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs.clone(),
+    };
+    tokio::spawn(async move { while rx_primary.recv().await.is_some() {} });
+
+    let mut state = State::new(genesis_certs);
+    state.insert(leader_round_1.clone());
+    state.insert(second_candidate_round_1);
+    state.insert(support_round_2_a.clone());
+    state.insert(support_round_2_b.clone());
+    state.insert(activation_round_3);
+
+    let mut pending = consensus
+        .fast_coin_pending_commit_check_for_round(3, &state)
+        .expect("round 3 should activate fast coin pending state");
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 3, &mut pending)
+        .await;
+    assert!(
+        !committed,
+        "fast coin should wait until enough leader-round candidates gather f+1 support"
+    );
+
+    state.insert(late_support_round_2_c);
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 2, &mut pending)
+        .await;
+    assert!(
+        !committed,
+        "one extra support certificate should still leave the second candidate below f+1"
+    );
+
+    state.insert(late_support_round_2_d);
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 2, &mut pending)
+        .await;
+    assert!(committed, "fast coin should commit once m supported candidates exist");
+
+    let committed_leader = rx_output.recv().await.unwrap();
+    assert_eq!(committed_leader.round(), 1);
+    assert_eq!(committed_leader.origin(), leader_author);
+}
+
+#[tokio::test]
+async fn solid_candidate_threshold_delays_commit_until_enough_candidates() {
+    let committee = Committee {
+        solid_candidate_threshold: 2,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let genesis_parents = genesis_certs
+        .iter()
+        .map(|certificate| certificate.digest())
+        .collect::<BTreeSet<_>>();
+
+    let leader_author = authorities[0];
+    let second_candidate_author = authorities[1];
+    let supporter_a = authorities[2];
+    let supporter_b = authorities[3];
+
+    let (_, mut leader_round_1) = mock_certificate(leader_author, 1, genesis_parents.clone());
+    leader_round_1.header.id = leader_round_1.header.digest();
+    let leader_header_id = leader_round_1.header.id.clone();
+    let (_, mut second_candidate_round_1) =
+        mock_certificate(second_candidate_author, 1, genesis_parents.clone());
+    second_candidate_round_1.header.id = second_candidate_round_1.header.digest();
+    let second_candidate_header_id = second_candidate_round_1.header.id.clone();
+
+    let mut leader_only = HashSet::new();
+    leader_only.insert(leader_header_id.clone());
+    let mut both_candidates = leader_only.clone();
+    both_candidates.insert(second_candidate_header_id);
+
+    let (_, support_round_3_a) = mock_certificate_with_solid_wave(
+        supporter_a,
+        3,
+        BTreeSet::new(),
+        leader_only.clone(),
+    );
+    let (_, support_round_3_b) = mock_certificate_with_solid_wave(
+        supporter_b,
+        3,
+        BTreeSet::new(),
+        leader_only,
+    );
+    let (_, late_support_round_3_c) = mock_certificate_with_solid_wave(
+        leader_author,
+        3,
+        BTreeSet::new(),
+        both_candidates.clone(),
+    );
+    let (_, late_support_round_3_d) = mock_certificate_with_solid_wave(
+        second_candidate_author,
+        3,
+        BTreeSet::new(),
+        both_candidates,
+    );
+    let (_, activation_round_4) =
+        mock_certificate(supporter_a, 4, BTreeSet::from([leader_round_1.digest()]));
+
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(10);
+    let (tx_output, mut rx_output) = channel(10);
+    let mut consensus = Consensus {
+        committee: committee.clone(),
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs.clone(),
+    };
+    tokio::spawn(async move { while rx_primary.recv().await.is_some() {} });
+
+    let mut state = State::new(genesis_certs);
+    state.insert(leader_round_1.clone());
+    state.insert(second_candidate_round_1);
+    state.insert(support_round_3_a.clone());
+    state.insert(support_round_3_b.clone());
+    state.insert(activation_round_4);
+
+    let mut pending = consensus
+        .solid_pending_commit_check_for_round(4, &state)
+        .expect("round 4 should activate solid pending state");
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 4, &mut pending)
+        .await;
+    assert!(
+        !committed,
+        "solid path should wait until enough leader-round candidates gather f+1 support"
+    );
+
+    state.insert(late_support_round_3_c);
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 3, &mut pending)
+        .await;
+    assert!(
+        !committed,
+        "one extra support certificate should still leave the second candidate below f+1"
+    );
+
+    state.insert(late_support_round_3_d);
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 3, &mut pending)
+        .await;
+    assert!(committed, "solid path should commit once m supported candidates exist");
 
     let committed_leader = rx_output.recv().await.unwrap();
     assert_eq!(committed_leader.round(), 1);

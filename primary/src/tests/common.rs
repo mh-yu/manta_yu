@@ -70,6 +70,8 @@ pub fn committee() -> Committee {
         allow_cross_step_weak_edges: true,
         enable_fast_coin: false,
         enable_commit_recheck: true,
+        fast_coin_candidate_threshold: 0,
+        solid_candidate_threshold: 0,
     }
 }
 
