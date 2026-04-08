@@ -198,6 +198,14 @@ pub struct Consensus {
 }
 
 impl Consensus {
+    fn wave_index(&self, round: Round) -> Round {
+        let wave = self.committee.solid_wave_length().max(1);
+        if round == 0 {
+            return 0;
+        }
+        (round - 1) / wave
+    }
+
     fn current_normal_leader_round(&self, round: Round) -> Option<Round> {
         let step_length = self.committee.solid_step_length();
         let wave_length = self.committee.solid_wave_length();
@@ -277,15 +285,6 @@ impl Consensus {
                     leader_round, state.last_committed_leader_round
                 );
                 continue;
-            }
-            if let Some(target_round) = state.fast_path_blocked_until_normal_round {
-                if leader_round < target_round {
-                    debug!(
-                        "Skipping normal-path leader_round {} because fast path is blocked until leader_round {}",
-                        leader_round, target_round
-                    );
-                    continue;
-                }
             }
 
             let (leader_digest, leader) = match self.leader(leader_round, &state.dag) {
@@ -438,24 +437,33 @@ impl Consensus {
         state.fast_path_checked_rounds.insert(round);
 
         if let Some(target_round) = state.fast_path_blocked_until_normal_round {
+            let blocked_wave = self.wave_index(target_round);
+            let current_wave = self.wave_index(round);
             let current_leader_round = self.current_normal_leader_round(round);
-            if current_leader_round.map_or(true, |leader_round| leader_round < target_round) {
+
+            // Wave-scoped blocking: only rounds in the same wave stay blocked.
+            if current_wave == blocked_wave {
                 info!(
-                    "FAST_PATH_WAIT round={} blocked_until_normal_round={} current_leader_round={:?} last_committed_round={}",
+                    "FAST_PATH_WAIT round={} blocked_until_normal_round={} blocked_wave={} current_wave={} current_leader_round={:?} last_committed_round={}",
                     round,
                     target_round,
+                    blocked_wave,
+                    current_wave,
                     current_leader_round,
                     state.last_committed_certificate_round
                 );
-            } else {
-                info!(
-                    "FAST_PATH_WAIT round={} blocked_until_normal_round={} current_leader_round={:?} -> defer to normal path",
-                    round,
-                    target_round,
-                    current_leader_round
-                );
+                return;
             }
-            return;
+
+            info!(
+                "FAST_PATH_UNBLOCK round={} blocked_until_normal_round={} blocked_wave={} current_wave={} current_leader_round={:?}",
+                round,
+                target_round,
+                blocked_wave,
+                current_wave,
+                current_leader_round
+            );
+            state.fast_path_blocked_until_normal_round = None;
         }
 
         info!("Checking fast path for round {}", round);
