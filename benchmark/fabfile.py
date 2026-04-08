@@ -268,19 +268,19 @@ def cloudlab_remote(
         'rate_type': 'balanced',
         # 'rate': [20000,40000,60000,80000,100000,120000,140000,160000,180000,200000],
         # 'rate': [60000,120000],
-        'rate': [150000],
+        'rate': [160000],
         'tx_size': 512,
-        'duration': 20,
+        'duration': 60,
         'runs': 1,       
     }
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 80,  # ms
+        'max_header_delay': 100,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
-        'batch_size': 128_000,  # bytes
-        'max_batch_delay': 35,  # ms
+        'batch_size': 500_000,  # bytes
+        'max_batch_delay': 100,  # ms
         'sigma': sigma,
         'kappa': kappa,
         'reference': reference,
