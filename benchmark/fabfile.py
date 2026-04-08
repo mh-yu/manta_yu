@@ -271,11 +271,11 @@ def cloudlab_remote(
         'collocate': True,
         'rate_type': 'balanced',
         # 'rate': [20000,40000,60000,80000,100000,120000,140000,160000,180000,200000],
-        # 'rate': [60000,120000],
-        'rate': [100000],
+        'rate': [120000,140000,150000,160000,180000],
+        # 'rate': [100000],
         'tx_size': 512,
-        'duration': 60,
-        'runs': 1,       
+        'duration': 120,
+        'runs': 2,       
     }
     node_params = {
         'header_size': 1_000,  # bytes
