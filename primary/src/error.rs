@@ -54,6 +54,9 @@ pub enum DagError {
     #[error("Parents of header {0} are not a quorum")]
     HeaderRequiresQuorum(Digest),
 
+    #[error("Header {0} does not link to enough round-{1} vertices")]
+    HeaderRequiresWaveLink(Digest, Round),
+
     #[error("Message {0} (round {1}) too old")]
     TooOld(Digest, Round),
 }

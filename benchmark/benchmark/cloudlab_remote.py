@@ -1070,7 +1070,7 @@ class CloudLabBench:
         return committee
     
     def _logs(self, committee, faults, max_workers=1):
-        """Download logs from all hosts using download_logs.py"""
+        """Download logs and process them once into summary.txt"""
         Print.info('Downloading logs...')
         
         # Get benchmark directory (parent of benchmark/benchmark/)
@@ -1080,9 +1080,12 @@ class CloudLabBench:
         if not download_logs_script.exists():
             Print.error(f'download_logs.py not found at {download_logs_script}')
             Print.error('Falling back to basic log download...')
-            # Fallback: create logs directory and return parser
+            # Fallback: create logs directory and process logs locally once.
             Path(PathMaker.logs_path()).mkdir(parents=True, exist_ok=True)
-            return LogParser.process(PathMaker.logs_path(), faults=faults)
+            result = LogParser.process(PathMaker.logs_path(), faults=faults)
+            print(result.result())
+            result.print(PathMaker.summary_file())
+            return
         
         # Run download_logs.py to download all logs
         try:
@@ -1112,9 +1115,9 @@ class CloudLabBench:
             run_benchmark_script = benchmark_dir / 'run_cloudlab_benchmark.py'
             
             if run_benchmark_script.exists():
-                Print.info('Running run_cloudlab_benchmark.py --no-run to process logs...')
+                Print.info('Running run_cloudlab_benchmark.py --no-run to process logs and save summary...')
                 result = subprocess.run(
-                    [sys.executable, str(run_benchmark_script), '--no-run', '--no-save'],
+                    [sys.executable, str(run_benchmark_script), '--no-run'],
                     cwd=str(benchmark_dir),
                     capture_output=False,  # Show output in real-time
                     text=True
@@ -1129,9 +1132,6 @@ class CloudLabBench:
             Print.warn(f'⚠ Failed to run run_cloudlab_benchmark.py --no-run: {e}')
         
         Print.info('=' * 60)
-        
-        # Parse and return logs
-        return LogParser.process(PathMaker.logs_path(), faults=faults)
     
     def _background_run(self, host_info, command, log_file):
         """Run a command in the background using nohup on a remote host"""
@@ -1621,17 +1621,12 @@ SCRIPTEOF'''
                                 rate, committee_copy, bench_parameters, node_parameters, selected_hosts, debug
                             )
                             
-                            # Download and parse logs
-                            result = self._logs(committee_copy, bench_parameters.faults, max_workers=bench_parameters.workers)
-                            result.print(PathMaker.summary_file())
-                            result.print(PathMaker.result_file(
+                            # Download logs, then process them once and save summary.txt.
+                            self._logs(
+                                committee_copy,
                                 bench_parameters.faults,
-                                n,
-                                bench_parameters.workers,
-                                bench_parameters.collocate,
-                                rate,
-                                bench_parameters.tx_size,
-                            ))
+                                max_workers=bench_parameters.workers,
+                            )
                             PathMaker.export_run_artifacts()
                         except (subprocess.SubprocessError, GroupException, ParseError) as e:
                             self.kill(hosts=selected_hosts)

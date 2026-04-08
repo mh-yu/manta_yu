@@ -6,7 +6,7 @@ use crate::primary::{PrimaryMessage, Round};
 use crate::synchronizer::Synchronizer;
 use async_recursion::async_recursion;
 use bytes::Bytes;
-use config::Committee;
+use config::{Committee, Stake};
 use crypto::Hash as _;
 use crypto::{Digest, PublicKey, SignatureService};
 use log::{debug, error, warn};
@@ -74,6 +74,86 @@ impl Core {
             .authorities
             .keys()
             .position(|authority| authority == key)
+    }
+
+    fn wave_back_link_target_round(&self, round: Round) -> Option<Round> {
+        if !self.committee.is_solid_wave(round) {
+            return None;
+        }
+
+        let regular_weak_start = self.committee.solid_step_parent_start(round);
+        (regular_weak_start > 1).then_some(regular_weak_start - 1)
+    }
+
+    async fn resolve_round_author(
+        &mut self,
+        digest: &Digest,
+    ) -> DagResult<Option<(Round, PublicKey)>> {
+        let Some(bytes) = self.store.read(digest.to_vec()).await? else {
+            return Ok(None);
+        };
+
+        if let Ok(certificate) = bincode::deserialize::<Certificate>(&bytes) {
+            return Ok(Some((certificate.round(), certificate.origin())));
+        }
+
+        if let Ok(header) = bincode::deserialize::<Header>(&bytes) {
+            return Ok(Some((header.round, header.author)));
+        }
+
+        Ok(None)
+    }
+
+    async fn wave_back_link_stake(
+        &mut self,
+        parents: &[Certificate],
+        round: Round,
+    ) -> DagResult<Stake> {
+        let Some(target_round) = self.wave_back_link_target_round(round) else {
+            return Ok(self.committee.quorum_threshold());
+        };
+
+        let mut reachable = HashSet::new();
+        for parent in parents {
+            if parent.round() == target_round {
+                reachable.insert(parent.origin());
+            }
+
+            let summary_vertices = if parent.header.solid_wave_vertices_merged.is_empty() {
+                &parent.header.solid_wave_vertices
+            } else {
+                &parent.header.solid_wave_vertices_merged
+            };
+
+            for digest in summary_vertices {
+                if let Some((resolved_round, author)) = self.resolve_round_author(digest).await? {
+                    if resolved_round == target_round {
+                        reachable.insert(author);
+                    }
+                }
+            }
+        }
+
+        Ok(reachable
+            .into_iter()
+            .map(|author| self.committee.stake(&author))
+            .sum())
+    }
+
+    async fn proposal_parents_certificates(
+        &mut self,
+        proposal_parents: &ProposalParents,
+    ) -> DagResult<Vec<Certificate>> {
+        let mut certificates = Vec::with_capacity(proposal_parents.parents.len());
+        for digest in &proposal_parents.parents {
+            let Some(bytes) = self.store.read(digest.to_vec()).await? else {
+                continue;
+            };
+            if let Ok(certificate) = bincode::deserialize::<Certificate>(&bytes) {
+                certificates.push(certificate);
+            }
+        }
+        Ok(certificates)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -237,6 +317,14 @@ impl Core {
             ensure!(
                 stake >= threshold as u64,
                 DagError::HeaderRequiresQuorum(header.id.clone())
+            );
+        }
+
+        if let Some(target_round) = self.wave_back_link_target_round(round) {
+            let link_stake = self.wave_back_link_stake(&parents, round).await?;
+            ensure!(
+                link_stake >= self.committee.quorum_threshold(),
+                DagError::HeaderRequiresWaveLink(header.id.clone(), target_round)
             );
         }
 
@@ -452,6 +540,24 @@ impl Core {
                 .or_insert_with(|| Box::new(CertificatesAggregator::new(target_round)))
                 .append(certificate.clone(), &self.committee)?
             {
+                let proposal_round = target_round + 1;
+                let parent_certificates = self.proposal_parents_certificates(&parents).await?;
+                if let Some(back_link_round) = self.wave_back_link_target_round(proposal_round) {
+                    let link_stake = self
+                        .wave_back_link_stake(&parent_certificates, proposal_round)
+                        .await?;
+                    if link_stake < self.committee.quorum_threshold() {
+                        debug!(
+                            "Delaying proposer unlock for round {}: only {} stake links to round {} (need {})",
+                            proposal_round,
+                            link_stake,
+                            back_link_round,
+                            self.committee.quorum_threshold(),
+                        );
+                        continue;
+                    }
+                }
+
                 // Send it to the `Proposer`.
                 self.tx_proposer
                     .send((parents, target_round))

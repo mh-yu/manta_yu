@@ -3,7 +3,9 @@ use super::*;
 use crate::common::{
     certificate, committee, committee_with_base_port, header, headers, keys, listener, votes,
 };
+use crypto::Signature;
 use futures::future::try_join_all;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use tokio::sync::mpsc::channel;
 
@@ -206,6 +208,153 @@ async fn process_header_missing_payload() {
 
     // Ensure the header is not stored.
     assert!(store.read(id.to_vec()).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn process_header_rejects_wave_boundary_without_quorum_back_link() {
+    fn make_header_with_metadata(
+        author: PublicKey,
+        secret: &crypto::SecretKey,
+        round: Round,
+        parents: BTreeSet<Digest>,
+        solid_step_merged: HashSet<Digest>,
+        solid_wave_merged: HashSet<Digest>,
+    ) -> Header {
+        let header = Header {
+            author,
+            round,
+            parents,
+            solid_step_vertices: solid_step_merged.clone(),
+            solid_step_vertices_merged: solid_step_merged,
+            solid_wave_vertices: solid_wave_merged.clone(),
+            solid_wave_vertices_merged: solid_wave_merged,
+            ..Header::default()
+        };
+        Header {
+            id: header.digest(),
+            signature: Signature::new(&header.digest(), secret),
+            ..header
+        }
+    }
+
+    let mut authorities = keys();
+    let (local_name, local_secret) = authorities.pop().unwrap();
+    let r2_authorities = authorities;
+
+    let signature_service = SignatureService::new(local_secret);
+    let (tx_sync_headers, _rx_sync_headers) = channel(1);
+    let (tx_sync_certificates, _rx_sync_certificates) = channel(1);
+    let (tx_primary_messages, rx_primary_messages) = channel(1);
+    let (_tx_headers_loopback, rx_headers_loopback) = channel(1);
+    let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
+    let (_tx_headers, rx_headers) = channel(1);
+    let (tx_consensus, _rx_consensus) = channel(1);
+    let (tx_parents, _rx_parents) = channel(1);
+
+    let path = ".db_test_process_header_rejects_wave_boundary_without_quorum_back_link";
+    let _ = fs::remove_dir_all(path);
+    let mut store = Store::new(path).unwrap();
+    let committee = committee();
+
+    let synchronizer = Synchronizer::new(
+        local_name,
+        &committee,
+        store.clone(),
+        /* tx_header_waiter */ tx_sync_headers,
+        /* tx_certificate_waiter */ tx_sync_certificates,
+    );
+
+    Core::spawn(
+        local_name,
+        committee.clone(),
+        store.clone(),
+        synchronizer,
+        signature_service,
+        /* consensus_round */ Arc::new(AtomicU64::new(0)),
+        /* gc_depth */ 50,
+        /* rx_primaries */ rx_primary_messages,
+        /* rx_header_waiter */ rx_headers_loopback,
+        /* rx_certificate_waiter */ rx_certificates_loopback,
+        /* rx_proposer */ rx_headers,
+        tx_consensus,
+        /* tx_proposer */ tx_parents,
+    );
+
+    let r2_headers: Vec<_> = r2_authorities
+        .iter()
+        .map(|(author, secret)| {
+            make_header_with_metadata(
+                *author,
+                secret,
+                2,
+                BTreeSet::new(),
+                HashSet::new(),
+                HashSet::new(),
+            )
+        })
+        .collect();
+    let r2_certificates: Vec<_> = r2_headers.iter().map(certificate).collect();
+    for cert in &r2_certificates {
+        let bytes = bincode::serialize(cert).unwrap();
+        store.write(cert.digest().to_vec(), bytes).await;
+    }
+
+    let r3_digests: HashSet<_> = r2_authorities
+        .iter()
+        .map(|(author, secret)| {
+            make_header_with_metadata(
+                *author,
+                secret,
+                3,
+                BTreeSet::new(),
+                HashSet::new(),
+                HashSet::new(),
+            )
+            .digest()
+        })
+        .collect();
+
+    let only_two_r2_links: HashSet<_> = r2_certificates
+        .iter()
+        .take(2)
+        .map(|cert| cert.digest())
+        .collect();
+
+    let r4_certificates: Vec<_> = r2_authorities
+        .iter()
+        .map(|(author, secret)| {
+            let header = make_header_with_metadata(
+                *author,
+                secret,
+                4,
+                BTreeSet::new(),
+                r3_digests.clone(),
+                only_two_r2_links.clone(),
+            );
+            certificate(&header)
+        })
+        .collect();
+    for cert in &r4_certificates {
+        let bytes = bincode::serialize(cert).unwrap();
+        store.write(cert.digest().to_vec(), bytes).await;
+    }
+
+    let rejected_header = make_header_with_metadata(
+        r2_authorities[0].0,
+        &r2_authorities[0].1,
+        5,
+        r4_certificates.iter().map(|cert| cert.digest()).collect(),
+        HashSet::new(),
+        HashSet::new(),
+    );
+    let rejected_id = rejected_header.id.clone();
+
+    tx_primary_messages
+        .send(PrimaryMessage::Header(rejected_header))
+        .await
+        .unwrap();
+
+    assert!(store.read(rejected_id.to_vec()).await.unwrap().is_none());
 }
 
 #[tokio::test]
