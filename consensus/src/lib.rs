@@ -198,6 +198,19 @@ pub struct Consensus {
 }
 
 impl Consensus {
+    fn current_normal_leader_round(&self, round: Round) -> Option<Round> {
+        let step_length = self.committee.solid_step_length();
+        let wave_length = self.committee.solid_wave_length();
+        if round < step_length {
+            return None;
+        }
+        let r = round - step_length;
+        if r % wave_length != 0 || r < 2 * wave_length {
+            return None;
+        }
+        Some(r - wave_length)
+    }
+
     pub fn spawn(
         committee: Committee,
         gc_depth: Round,
@@ -264,6 +277,15 @@ impl Consensus {
                     leader_round, state.last_committed_leader_round
                 );
                 continue;
+            }
+            if let Some(target_round) = state.fast_path_blocked_until_normal_round {
+                if leader_round < target_round {
+                    debug!(
+                        "Skipping normal-path leader_round {} because fast path is blocked until leader_round {}",
+                        leader_round, target_round
+                    );
+                    continue;
+                }
             }
 
             let (leader_digest, leader) = match self.leader(leader_round, &state.dag) {
@@ -416,16 +438,24 @@ impl Consensus {
         state.fast_path_checked_rounds.insert(round);
 
         if let Some(target_round) = state.fast_path_blocked_until_normal_round {
-            if state.last_committed_certificate_round < target_round {
+            let current_leader_round = self.current_normal_leader_round(round);
+            if current_leader_round.map_or(true, |leader_round| leader_round < target_round) {
                 info!(
-                    "FAST_PATH_WAIT round={} blocked_until_normal_round={} last_committed_round={}",
+                    "FAST_PATH_WAIT round={} blocked_until_normal_round={} current_leader_round={:?} last_committed_round={}",
                     round,
                     target_round,
+                    current_leader_round,
                     state.last_committed_certificate_round
                 );
-                return;
+            } else {
+                info!(
+                    "FAST_PATH_WAIT round={} blocked_until_normal_round={} current_leader_round={:?} -> defer to normal path",
+                    round,
+                    target_round,
+                    current_leader_round
+                );
             }
-            state.fast_path_blocked_until_normal_round = None;
+            return;
         }
 
         info!("Checking fast path for round {}", round);
