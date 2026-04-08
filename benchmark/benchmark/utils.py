@@ -3,6 +3,7 @@ import csv
 import json
 import os
 import re
+import shutil
 from datetime import datetime
 from glob import glob
 from os.path import join
@@ -57,7 +58,15 @@ class PathMaker:
 
     @staticmethod
     def logs_path():
-        return join(PathMaker.output_path(), 'logs')
+        return join(PathMaker.base_results_path(), 'logs')
+
+    @staticmethod
+    def reset_logs_path():
+        logs_dir = PathMaker.logs_path()
+        if os.path.isdir(logs_dir):
+            shutil.rmtree(logs_dir)
+        os.makedirs(logs_dir, exist_ok=True)
+        return logs_dir
 
     @staticmethod
     def primary_log_file(i):

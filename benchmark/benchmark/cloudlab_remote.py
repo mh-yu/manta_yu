@@ -1081,7 +1081,7 @@ class CloudLabBench:
             Print.error(f'download_logs.py not found at {download_logs_script}')
             Print.error('Falling back to basic log download...')
             # Fallback: create logs directory and process logs locally once.
-            Path(PathMaker.logs_path()).mkdir(parents=True, exist_ok=True)
+            PathMaker.reset_logs_path()
             result = LogParser.process(PathMaker.logs_path(), faults=faults)
             print(result.result())
             result.print(PathMaker.summary_file())
@@ -1092,7 +1092,13 @@ class CloudLabBench:
             import sys
             Print.info(f'Running download_logs.py with max_workers={max_workers}...')
             result = subprocess.run(
-                [sys.executable, str(download_logs_script), '--max-workers', str(max_workers)],
+                [
+                    sys.executable,
+                    str(download_logs_script),
+                    '--max-workers',
+                    str(max_workers),
+                    '--refresh',
+                ],
                 cwd=str(benchmark_dir),
                 capture_output=False,  # Show output in real-time
                 text=True

@@ -43,7 +43,7 @@ def run_fab_command(task='cloudlab_remote', debug=False, fab_kwargs=None):
         Print.error(f'Failed to run fab command: {e}')
         return False
 
-def download_logs_if_needed(settings_file='cloudlab_settings.json', max_workers=1):
+def download_logs_if_needed(settings_file='cloudlab_settings.json', max_workers=1, force_download=False):
     """Download logs if they don't exist locally"""
     logs_dir = Path(PathMaker.logs_path())
     
@@ -52,15 +52,18 @@ def download_logs_if_needed(settings_file='cloudlab_settings.json', max_workers=
     worker_logs = list(logs_dir.glob('worker-*.log'))
     client_logs = list(logs_dir.glob('client-*.log'))
     
-    if primary_logs or worker_logs or client_logs:
+    if not force_download and (primary_logs or worker_logs or client_logs):
         Print.info(f'Found existing logs: {len(primary_logs)} primary, {len(worker_logs)} worker, {len(client_logs)} client')
         return True
     
     # Try to download logs
-    Print.info('No local logs found, attempting to download from remote nodes...')
+    if force_download:
+        Print.info('Refreshing shared local logs from remote nodes...')
+    else:
+        Print.info('No local logs found, attempting to download from remote nodes...')
     try:
         from download_logs import download_logs
-        return download_logs(settings_file, max_workers)
+        return download_logs(settings_file, max_workers, refresh=force_download)
     except ImportError:
         Print.warn('download_logs.py not found, skipping download')
         return False
@@ -232,11 +235,15 @@ Examples:
     
     # Step 2: Download logs if needed (unless download-only)
     if not args.download_only:
-        download_logs_if_needed(args.settings, args.max_workers)
+        download_logs_if_needed(
+            args.settings,
+            args.max_workers,
+            force_download=not args.no_run,
+        )
     else:
         # Download-only mode
         Print.info('Download-only mode: downloading logs from remote nodes...')
-        download_logs_if_needed(args.settings, args.max_workers)
+        download_logs_if_needed(args.settings, args.max_workers, force_download=True)
         Print.info('Download complete. Exiting.')
         return 0
     
