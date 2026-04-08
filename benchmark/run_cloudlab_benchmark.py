@@ -96,13 +96,6 @@ def process_logs(faults=0, save_to_file=True):
             
             Print.info(f'\nResults saved to: {result_file}')
         
-        # Export latency CSV
-        csv_file = parser.export_latency_csv()
-        if csv_file:
-            Print.info(f'Latency CSV exported to: {csv_file}')
-        else:
-            Print.warn('Failed to export latency CSV (no latency data available)')
-
         artifacts = PathMaker.export_run_artifacts()
         if 'final_dag' in artifacts:
             Print.info(f'Final DAG exported to: {artifacts["final_dag"]}')

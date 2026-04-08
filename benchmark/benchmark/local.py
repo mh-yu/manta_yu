@@ -227,7 +227,6 @@ class LocalBench:
                 rate,
                 self.tx_size,
             ))
-            logger.export_latency_csv()
             PathMaker.export_run_artifacts()
             return logger
 

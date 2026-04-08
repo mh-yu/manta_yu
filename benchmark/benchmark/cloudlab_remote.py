@@ -1607,6 +1607,8 @@ SCRIPTEOF'''
                                             'allow_cross_step_weak_edges',
                                             'enable_fast_coin',
                                             'enable_commit_recheck',
+                                            'fast_coin_candidate_threshold',
+                                            'solid_candidate_threshold',
                                             'design_tag',
                                         )
                                     },
@@ -1630,7 +1632,6 @@ SCRIPTEOF'''
                                 rate,
                                 bench_parameters.tx_size,
                             ))
-                            result.export_latency_csv()
                             PathMaker.export_run_artifacts()
                         except (subprocess.SubprocessError, GroupException, ParseError) as e:
                             self.kill(hosts=selected_hosts)
