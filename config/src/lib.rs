@@ -34,6 +34,14 @@ fn default_enable_adaptive_intermediate_spill() -> bool {
     false
 }
 
+fn default_adaptive_intermediate_spill_trigger_digests() -> usize {
+    2
+}
+
+fn default_adaptive_intermediate_spill_cap_digests() -> usize {
+    1
+}
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("Node {0} is not in the committee")]
@@ -107,6 +115,14 @@ pub struct Parameters {
     /// amount of new digests into the intermediate queue once the critical backlog is large enough.
     #[serde(default = "default_enable_adaptive_intermediate_spill")]
     pub enable_adaptive_intermediate_spill: bool,
+    /// Minimum number of critical-queue digests required before adaptive spill may route new
+    /// digests into the intermediate queue.
+    #[serde(default = "default_adaptive_intermediate_spill_trigger_digests")]
+    pub adaptive_intermediate_spill_trigger_digests: usize,
+    /// Maximum number of digests to keep in the intermediate spill window before routing new
+    /// digests back to the critical queue.
+    #[serde(default = "default_adaptive_intermediate_spill_cap_digests")]
+    pub adaptive_intermediate_spill_cap_digests: usize,
 }
 
 impl Default for Parameters {
@@ -120,6 +136,8 @@ impl Default for Parameters {
             batch_size: 500_000,
             max_batch_delay: 100,
             enable_adaptive_intermediate_spill: false,
+            adaptive_intermediate_spill_trigger_digests: 2,
+            adaptive_intermediate_spill_cap_digests: 1,
         }
     }
 }
@@ -138,6 +156,14 @@ impl Parameters {
         info!(
             "Adaptive intermediate spill set to {}",
             self.enable_adaptive_intermediate_spill
+        );
+        info!(
+            "Adaptive intermediate spill trigger set to {} digests",
+            self.adaptive_intermediate_spill_trigger_digests
+        );
+        info!(
+            "Adaptive intermediate spill cap set to {} digests",
+            self.adaptive_intermediate_spill_cap_digests
         );
     }
 }

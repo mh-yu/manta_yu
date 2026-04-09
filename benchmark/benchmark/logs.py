@@ -277,6 +277,14 @@ class LogParser:
             ('Fast coin candidate threshold', 'fast_coin_candidate_threshold'),
             ('Solid candidate threshold', 'solid_candidate_threshold'),
             ('Enable adaptive intermediate spill', 'enable_adaptive_intermediate_spill'),
+            (
+                'Adaptive intermediate spill trigger digests',
+                'adaptive_intermediate_spill_trigger_digests',
+            ),
+            (
+                'Adaptive intermediate spill cap digests',
+                'adaptive_intermediate_spill_cap_digests',
+            ),
             ('Design tag', 'design_tag'),
         ):
             value = node_params.get(key)

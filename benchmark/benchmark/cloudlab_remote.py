@@ -1616,6 +1616,8 @@ SCRIPTEOF'''
                                             'fast_coin_candidate_threshold',
                                             'solid_candidate_threshold',
                                             'enable_adaptive_intermediate_spill',
+                                            'adaptive_intermediate_spill_trigger_digests',
+                                            'adaptive_intermediate_spill_cap_digests',
                                             'design_tag',
                                         )
                                     },

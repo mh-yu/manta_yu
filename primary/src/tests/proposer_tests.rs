@@ -24,6 +24,8 @@ async fn propose_empty() {
         /* header_size */ 1_000,
         /* max_header_delay */ 20,
         /* enable_adaptive_intermediate_spill */ false,
+        /* adaptive_intermediate_spill_trigger_digests */ 2,
+        /* adaptive_intermediate_spill_cap_digests */ 1,
         /* rx_core */ rx_parents,
         /* rx_workers */ rx_our_digests,
         /* tx_core */ tx_headers,
@@ -89,6 +91,8 @@ async fn propose_payload() {
         tx_core: tx_headers,
         local_workers: 1,
         enable_adaptive_intermediate_spill: false,
+        adaptive_intermediate_spill_trigger_digests: 2,
+        adaptive_intermediate_spill_cap_digests: 1,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 2,
@@ -150,6 +154,8 @@ async fn intermediate_round_still_proposes_empty_with_single_worker() {
         tx_core: tx_headers,
         local_workers: 1,
         enable_adaptive_intermediate_spill: false,
+        adaptive_intermediate_spill_trigger_digests: 2,
+        adaptive_intermediate_spill_cap_digests: 1,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 1,
@@ -211,6 +217,8 @@ async fn single_worker_never_uses_intermediate_payload_queue() {
         tx_core: tx_headers,
         local_workers: 1,
         enable_adaptive_intermediate_spill: false,
+        adaptive_intermediate_spill_trigger_digests: 2,
+        adaptive_intermediate_spill_cap_digests: 1,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 1,
@@ -254,22 +262,24 @@ async fn adaptive_spill_prefers_critical_until_small_intermediate_window_fills()
         tx_core: tx_headers,
         local_workers: 1,
         enable_adaptive_intermediate_spill: true,
+        adaptive_intermediate_spill_trigger_digests: 2,
+        adaptive_intermediate_spill_cap_digests: 1,
         unlocked_rounds: HashMap::new(),
         proposed_rounds: HashSet::new(),
         next_unlock_order: 0,
         intermediate_digests: VecDeque::new(),
         intermediate_payload_size: 0,
         critical_digests: VecDeque::new(),
-        critical_payload_size: 31,
+        critical_payload_size: 0,
         solid_step_length: committee.solid_step_length(),
         solid_wave_length: committee.solid_wave_length(),
         parent_grace_delay: Duration::from_millis(0),
     };
 
     assert_eq!(proposer.payload_queue_for_worker(0), RoundClass::Critical);
-    proposer.critical_payload_size = 64;
+    proposer.critical_digests = VecDeque::from(vec![(Digest([1; 32]), 0), (Digest([2; 32]), 0)]);
     assert_eq!(proposer.payload_queue_for_worker(0), RoundClass::Intermediate);
-    proposer.intermediate_payload_size = 32;
+    proposer.intermediate_digests = VecDeque::from(vec![(Digest([3; 32]), 0)]);
     assert_eq!(proposer.payload_queue_for_worker(0), RoundClass::Critical);
 }
 
@@ -315,6 +325,8 @@ async fn intermediate_round_uses_payload_from_dedicated_queue() {
         tx_core: tx_headers,
         local_workers: 2,
         enable_adaptive_intermediate_spill: false,
+        adaptive_intermediate_spill_trigger_digests: 2,
+        adaptive_intermediate_spill_cap_digests: 1,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 1,
@@ -373,6 +385,8 @@ async fn critical_unlock_keeps_existing_intermediate_round() {
         tx_core: tx_headers,
         local_workers: 2,
         enable_adaptive_intermediate_spill: false,
+        adaptive_intermediate_spill_trigger_digests: 2,
+        adaptive_intermediate_spill_cap_digests: 1,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 1,
@@ -416,6 +430,8 @@ async fn intermediate_round_is_kept_after_critical_started() {
         tx_core: tx_headers,
         local_workers: 2,
         enable_adaptive_intermediate_spill: false,
+        adaptive_intermediate_spill_trigger_digests: 2,
+        adaptive_intermediate_spill_cap_digests: 1,
         unlocked_rounds: HashMap::new(),
         proposed_rounds: [3u64].iter().copied().collect(),
         next_unlock_order: 0,

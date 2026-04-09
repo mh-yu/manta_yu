@@ -212,6 +212,14 @@ class NodeParameters:
             if field in json and not isinstance(json[field], bool):
                 raise ConfigError(f'Invalid parameters type for {field}')
 
+        optional_int_fields = [
+            'adaptive_intermediate_spill_trigger_digests',
+            'adaptive_intermediate_spill_cap_digests',
+        ]
+        for field in optional_int_fields:
+            if field in json and not isinstance(json[field], int):
+                raise ConfigError(f'Invalid parameters type for {field}')
+
         self.json = json
 
     def print(self, filename):

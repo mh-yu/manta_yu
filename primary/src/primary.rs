@@ -193,6 +193,8 @@ impl Primary {
             parameters.header_size,
             parameters.max_header_delay,
             parameters.enable_adaptive_intermediate_spill,
+            parameters.adaptive_intermediate_spill_trigger_digests,
+            parameters.adaptive_intermediate_spill_cap_digests,
             /* rx_core */ rx_parents,
             /* rx_workers */ rx_our_digests,
             /* tx_core */ tx_headers,

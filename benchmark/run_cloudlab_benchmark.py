@@ -195,6 +195,10 @@ Examples:
                        action='store_false',
                        help='Disable adaptive spillover and keep the default queue behavior for the current worker setting')
     parser.set_defaults(enable_adaptive_intermediate_spill=False)
+    parser.add_argument('--adaptive-intermediate-spill-trigger-digests', type=int, default=2,
+                       help='Minimum number of critical-queue digests required before adaptive spill may route new digests to the intermediate queue')
+    parser.add_argument('--adaptive-intermediate-spill-cap-digests', type=int, default=1,
+                       help='Maximum number of digests to keep in the intermediate spill window before routing new digests back to the critical queue')
     parser.add_argument('--design-tag', default='manta',
                        help='Design tag written to summary and run directory name (default: manta)')
     
@@ -232,6 +236,8 @@ Examples:
                 'fast_coin_candidate_threshold': args.fast_coin_candidate_threshold,
                 'solid_candidate_threshold': args.solid_candidate_threshold,
                 'enable_adaptive_intermediate_spill': args.enable_adaptive_intermediate_spill,
+                'adaptive_intermediate_spill_trigger_digests': args.adaptive_intermediate_spill_trigger_digests,
+                'adaptive_intermediate_spill_cap_digests': args.adaptive_intermediate_spill_cap_digests,
                 'design_tag': args.design_tag,
             },
         )

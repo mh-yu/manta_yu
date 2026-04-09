@@ -39,6 +39,10 @@ pub struct Proposer {
     /// Whether to only spill into the intermediate queue after the critical queue
     /// already accumulated a meaningful backlog.
     enable_adaptive_intermediate_spill: bool,
+    /// Minimum number of critical digests required before adaptive spill starts.
+    adaptive_intermediate_spill_trigger_digests: usize,
+    /// Maximum number of digests to keep in the intermediate spill window.
+    adaptive_intermediate_spill_cap_digests: usize,
 
     /// Unlocked proposal rounds waiting to be materialized into headers.
     unlocked_rounds: HashMap<Round, UnlockedRound>,
@@ -94,6 +98,8 @@ impl Proposer {
         header_size: usize,
         max_header_delay: u64,
         enable_adaptive_intermediate_spill: bool,
+        adaptive_intermediate_spill_trigger_digests: usize,
+        adaptive_intermediate_spill_cap_digests: usize,
         rx_core: Receiver<(ProposalParents, Round)>,
         rx_workers: Receiver<(Digest, WorkerId)>,
         tx_core: Sender<Header>,
@@ -143,6 +149,8 @@ impl Proposer {
                 tx_core,
                 local_workers,
                 enable_adaptive_intermediate_spill,
+                adaptive_intermediate_spill_trigger_digests,
+                adaptive_intermediate_spill_cap_digests,
                 unlocked_rounds,
                 proposed_rounds: HashSet::new(),
                 next_unlock_order: 1,
@@ -213,8 +221,8 @@ impl Proposer {
 
     fn should_spill_to_intermediate(&self) -> bool {
         self.enable_adaptive_intermediate_spill
-            && self.critical_payload_size >= 2 * self.header_size
-            && self.intermediate_payload_size < self.header_size
+            && self.critical_digests.len() >= self.adaptive_intermediate_spill_trigger_digests
+            && self.intermediate_digests.len() < self.adaptive_intermediate_spill_cap_digests
     }
 
     fn next_recheck_deadline(

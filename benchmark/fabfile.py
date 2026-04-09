@@ -259,6 +259,8 @@ def cloudlab_remote(
     fast_coin_candidate_threshold=4,
     solid_candidate_threshold=4,
     enable_adaptive_intermediate_spill=True,
+    adaptive_intermediate_spill_trigger_digests=2,
+    adaptive_intermediate_spill_cap_digests=1,
     design_tag='manta_final_80ms',
 ):
     ''' Run benchmarks on CloudLab '''
@@ -272,13 +274,13 @@ def cloudlab_remote(
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        # 'rate': [20000,40000,60000,80000,100000,120000,140000,160000,180000,200000],
-        'rate': [100000],
+        # 'rate': [20000,40000,60000,80000,100000,120000,140000],
+        'rate': [120000],
         # 'rate': [40000,80000,100000,120000,140000,150000,160000,180000],
         # 'rate': [130000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 1,       
+        'runs': 2,       
     }
     node_params = {
         'header_size': 1_000,  # bytes
@@ -298,6 +300,8 @@ def cloudlab_remote(
         'fast_coin_candidate_threshold': int(fast_coin_candidate_threshold),
         'solid_candidate_threshold': int(solid_candidate_threshold),
         'enable_adaptive_intermediate_spill': enable_adaptive_intermediate_spill,
+        'adaptive_intermediate_spill_trigger_digests': int(adaptive_intermediate_spill_trigger_digests),
+        'adaptive_intermediate_spill_cap_digests': int(adaptive_intermediate_spill_cap_digests),
         'design_tag': design_tag,
         # 's': 0.99,
     }
