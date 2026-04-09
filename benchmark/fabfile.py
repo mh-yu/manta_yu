@@ -258,7 +258,7 @@ def cloudlab_remote(
     enable_commit_recheck=True,
     fast_coin_candidate_threshold=4,
     solid_candidate_threshold=4,
-    design_tag='manta_final_80ms',
+    design_tag='manta_final_no_delay',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
