@@ -1661,16 +1661,6 @@ SCRIPTEOF'''
                                 rate,
                                 bench_parameters.tx_size,
                             ))
-                            tag_result_file = self._tag_results_dir(network_tag) / self._tagged_bench_result_filename(
-                                network_tag,
-                                bench_parameters.faults,
-                                n,
-                                bench_parameters.workers,
-                                bench_parameters.collocate,
-                                rate,
-                                bench_parameters.tx_size,
-                            )
-                            result.print(str(tag_result_file))
 
                             run_dir = self._create_run_dir(
                                 network_tag,
