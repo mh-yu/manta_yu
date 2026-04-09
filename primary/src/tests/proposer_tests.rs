@@ -167,6 +167,70 @@ async fn intermediate_round_still_proposes_empty_with_single_worker() {
 }
 
 #[tokio::test]
+async fn single_worker_never_uses_intermediate_payload_queue() {
+    let committee = committee();
+    let (name, secret) = keys().pop().unwrap();
+    let signature_service = SignatureService::new(secret);
+    let genesis_parent = Certificate::genesis(&committee)
+        .iter()
+        .next()
+        .unwrap()
+        .digest();
+    let (tx_parents, rx_parents) = channel::<(ProposalParents, Round)>(1);
+    let (tx_our_digests, rx_our_digests) = channel::<(Digest, WorkerId)>(1);
+    let (tx_headers, _rx_headers) = channel::<Header>(1);
+
+    drop(tx_parents);
+    drop(tx_our_digests);
+
+    let mut unlocked_rounds = HashMap::new();
+    unlocked_rounds.insert(
+        2,
+        UnlockedRound {
+            parents: vec![genesis_parent],
+            solid_step_union: HashSet::new(),
+            solid_wave_union: HashSet::new(),
+            wave_back_link_target_round: 0,
+            wave_back_link_author_bitmap: Vec::new(),
+            ready_since: Instant::now(),
+            unlock_order: 0,
+        },
+    );
+
+    let proposer = Proposer {
+        name,
+        node_id: None,
+        signature_service,
+        header_size: 32,
+        max_header_delay: 1_000,
+        rx_core: rx_parents,
+        rx_workers: rx_our_digests,
+        tx_core: tx_headers,
+        local_workers: 1,
+        unlocked_rounds,
+        proposed_rounds: HashSet::new(),
+        next_unlock_order: 1,
+        intermediate_digests: VecDeque::from(vec![(Digest([7; 32]), 0)]),
+        intermediate_payload_size: 32,
+        critical_digests: VecDeque::new(),
+        critical_payload_size: 0,
+        solid_step_length: committee.solid_step_length(),
+        solid_wave_length: committee.solid_wave_length(),
+        parent_grace_delay: Duration::from_millis(0),
+    };
+
+    let decision = proposer
+        .next_proposal_round(false, false, false, true, true);
+    assert!(decision.is_none());
+
+    let decision = proposer
+        .next_proposal_round(true, false, false, false, false)
+        .unwrap();
+    assert_eq!(decision.round, 2);
+    assert!(!decision.include_payload);
+}
+
+#[tokio::test]
 async fn intermediate_round_uses_payload_from_dedicated_queue() {
     let committee = committee();
     let (name, secret) = keys().pop().unwrap();

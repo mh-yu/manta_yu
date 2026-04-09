@@ -87,6 +87,9 @@ class LogParser:
                 f'Clients missed their target rate {self.misses:,} time(s)'
             )
 
+        self._matched_end_to_end_samples_cache = None
+        self._missing_end_to_end_samples = None
+
     def _merge_results(self, input):
         # Keep the earliest timestamp.
         merged = {}
@@ -219,15 +222,36 @@ class LogParser:
         tps = bps / self.size[0]
         return tps, bps, duration
 
-    def _end_to_end_latency(self):
-        latency = []
-        for sent, received in zip(self.sent_samples, self.received_samples):
+    def _matched_end_to_end_samples(self):
+        if self._matched_end_to_end_samples_cache is not None:
+            return self._matched_end_to_end_samples_cache
+
+        matched = []
+        missing = 0
+        for client_index, (sent, received) in enumerate(
+            zip(self.sent_samples, self.received_samples)
+        ):
             for tx_id, batch_id in received.items():
-                if batch_id in self.commits:
-                    assert tx_id in sent  # We receive txs that we sent.
-                    start = sent[tx_id]
-                    end = self.commits[batch_id]
-                    latency += [end-start]
+                commit_ts = self.commits.get(batch_id)
+                if commit_ts is None:
+                    continue
+
+                start_ts = sent.get(tx_id)
+                if start_ts is None:
+                    missing += 1
+                    continue
+
+                matched.append((client_index, tx_id, start_ts, commit_ts))
+
+        self._matched_end_to_end_samples_cache = matched
+        self._missing_end_to_end_samples = missing
+        return matched
+
+    def _end_to_end_latency(self):
+        latency = [
+            commit_ts - start_ts
+            for _, _, start_ts, commit_ts in self._matched_end_to_end_samples()
+        ]
         return mean(latency) if latency else 0
 
     def result(self):
@@ -262,6 +286,13 @@ class LogParser:
         consensus_tps, consensus_bps, _ = self._consensus_throughput()
         end_to_end_tps, end_to_end_bps, duration = self._end_to_end_throughput()
         end_to_end_latency = self._end_to_end_latency() * 1_000
+        missing_end_to_end_samples = self._missing_end_to_end_samples or 0
+        sample_warning = ''
+        if missing_end_to_end_samples:
+            sample_warning = (
+                f' Skipped end-to-end samples missing client send timestamps: '
+                f'{missing_end_to_end_samples:,}\n'
+            )
 
         return (
             '\n'
@@ -294,6 +325,7 @@ class LogParser:
             f' End-to-end TPS: {round(end_to_end_tps):,} tx/s\n'
             f' End-to-end BPS: {round(end_to_end_bps):,} B/s\n'
             f' End-to-end latency: {round(end_to_end_latency):,} ms\n'
+            f'{sample_warning}'
             '-----------------------------------------\n'
         )
 
@@ -316,17 +348,12 @@ class LogParser:
                 'latency_ms': round((commit_ts - proposal_ts) * 1000, 3),
             })
 
-        for sent, received in zip(self.sent_samples, self.received_samples):
-            for tx_id, batch_id in received.items():
-                commit_ts = self.commits.get(batch_id)
-                start_ts = sent.get(tx_id)
-                if commit_ts is None or start_ts is None:
-                    continue
-                rows.append({
-                    'metric': 'end_to_end_latency',
-                    'identifier': tx_id,
-                    'latency_ms': round((commit_ts - start_ts) * 1000, 3),
-                })
+        for client_index, tx_id, start_ts, commit_ts in self._matched_end_to_end_samples():
+            rows.append({
+                'metric': 'end_to_end_latency',
+                'identifier': f'{client_index}:{tx_id}',
+                'latency_ms': round((commit_ts - start_ts) * 1000, 3),
+            })
 
         if not rows:
             return None

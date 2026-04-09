@@ -202,6 +202,10 @@ impl Proposer {
         round == 1 || state.ready_since.elapsed() >= self.parent_grace_delay
     }
 
+    fn uses_dedicated_intermediate_queue(&self) -> bool {
+        self.local_workers > 1
+    }
+
     fn next_recheck_deadline(
         &self,
         proposal_deadline: Instant,
@@ -210,7 +214,12 @@ impl Proposer {
     ) -> Instant {
         let mut next_deadline = std::iter::once(proposal_deadline)
             .chain(critical_payload_deadline.into_iter())
-            .chain(intermediate_payload_deadline)
+            .chain(
+                self.uses_dedicated_intermediate_queue()
+                    .then_some(intermediate_payload_deadline)
+                    .into_iter()
+                    .flatten(),
+            )
             .min()
             .unwrap_or(proposal_deadline);
 
@@ -329,6 +338,48 @@ impl Proposer {
             .min_by_key(|(_, state)| state.unlock_order)
             .map(|(round, _)| *round);
 
+        if !self.uses_dedicated_intermediate_queue() {
+            let critical_has_payload = !self.critical_digests.is_empty();
+            let critical_include_payload = critical_has_payload && critical_payload_trigger;
+            let critical_eligible = critical_round.is_some()
+                && (proposal_timer_expired || critical_payload_trigger);
+            let intermediate_eligible = intermediate_round.is_some() && proposal_timer_expired;
+
+            return match (critical_round, intermediate_round) {
+                (Some(critical_round), Some(intermediate_round)) => {
+                    if critical_include_payload {
+                        Some(ProposalDecision {
+                            round: critical_round,
+                            include_payload: true,
+                        })
+                    } else if intermediate_eligible {
+                        Some(ProposalDecision {
+                            round: intermediate_round,
+                            include_payload: false,
+                        })
+                    } else if critical_eligible {
+                        Some(ProposalDecision {
+                            round: critical_round,
+                            include_payload: false,
+                        })
+                    } else {
+                        None
+                    }
+                }
+                (Some(critical_round), None) if critical_eligible => Some(ProposalDecision {
+                    round: critical_round,
+                    include_payload: critical_include_payload,
+                }),
+                (None, Some(intermediate_round)) if intermediate_eligible => {
+                    Some(ProposalDecision {
+                        round: intermediate_round,
+                        include_payload: false,
+                    })
+                }
+                _ => None,
+            };
+        }
+
         let critical_has_payload = !self.critical_digests.is_empty();
         let intermediate_has_payload = !self.intermediate_digests.is_empty();
         let critical_include_payload = critical_has_payload && critical_payload_trigger;
@@ -373,7 +424,7 @@ impl Proposer {
     }
 
     fn payload_queue_for_worker(&self, worker_id: WorkerId) -> RoundClass {
-        if self.local_workers <= 1 {
+        if !self.uses_dedicated_intermediate_queue() {
             RoundClass::Critical
         } else if worker_id % 2 == 0 {
             RoundClass::Intermediate
@@ -506,11 +557,12 @@ impl Proposer {
             let now = Instant::now();
             let proposal_timer_expired = now >= proposal_deadline;
             let critical_enough_digests = self.critical_payload_size >= self.header_size;
-            let intermediate_enough_digests = self.intermediate_payload_size >= self.header_size;
+            let intermediate_enough_digests = self.uses_dedicated_intermediate_queue()
+                && self.intermediate_payload_size >= self.header_size;
             let critical_payload_timer_expired =
                 critical_payload_deadline.is_some_and(|deadline| now >= deadline);
-            let intermediate_payload_timer_expired =
-                intermediate_payload_deadline.is_some_and(|deadline| now >= deadline);
+            let intermediate_payload_timer_expired = self.uses_dedicated_intermediate_queue()
+                && intermediate_payload_deadline.is_some_and(|deadline| now >= deadline);
 
             if let Some(decision) = self.next_proposal_round(
                 proposal_timer_expired,
@@ -576,9 +628,18 @@ impl Proposer {
                             critical_payload_deadline.get_or_insert(payload_deadline);
                         }
                         RoundClass::Intermediate => {
-                            self.intermediate_payload_size += digest.size();
-                            self.intermediate_digests.push_back((digest, worker_id));
-                            intermediate_payload_deadline.get_or_insert(payload_deadline);
+                            if self.uses_dedicated_intermediate_queue() {
+                                self.intermediate_payload_size += digest.size();
+                                self.intermediate_digests.push_back((digest, worker_id));
+                                intermediate_payload_deadline.get_or_insert(payload_deadline);
+                            } else {
+                                debug!(
+                                    "Ignoring unexpected intermediate payload assignment in single-worker mode"
+                                );
+                                self.critical_payload_size += digest.size();
+                                self.critical_digests.push_back((digest, worker_id));
+                                critical_payload_deadline.get_or_insert(payload_deadline);
+                            }
                         }
                         RoundClass::Bootstrap => {}
                     }
