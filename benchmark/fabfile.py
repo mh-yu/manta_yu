@@ -59,6 +59,7 @@ def local(ctx, debug=False):
         'coverage': 7,
         'allow_cross_step_weak_edges': True,
         'enable_fast_coin': False,
+        'solid_commit_trigger_on_solid_step': False,
         'fast_coin_candidate_threshold': 0,
         'solid_candidate_threshold': 0,
         's': 0.99
@@ -255,17 +256,19 @@ def cloudlab_remote(
     coverage=7,
     allow_cross_step_weak_edges=True,
     enable_fast_coin=True,
-    enable_commit_recheck=True,
+    solid_commit_trigger_on_solid_step=False, # r3 commit
+    enable_commit_recheck=False, # r2 commit
     fast_coin_candidate_threshold=4,
     solid_candidate_threshold=4,
-    enable_adaptive_intermediate_spill=True,
-    adaptive_intermediate_spill_trigger_digests=1,
+    enable_adaptive_intermediate_spill=True, # payload shceduling
+    adaptive_intermediate_spill_trigger_digests=2,
     adaptive_intermediate_spill_cap_digests=1,
     design_tag='manta_final_80ms',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
     enable_fast_coin = _coerce_bool(enable_fast_coin)
+    solid_commit_trigger_on_solid_step = _coerce_bool(solid_commit_trigger_on_solid_step)
     enable_commit_recheck = _coerce_bool(enable_commit_recheck)
     enable_adaptive_intermediate_spill = _coerce_bool(enable_adaptive_intermediate_spill)
     bench_params = {
@@ -296,6 +299,7 @@ def cloudlab_remote(
         'coverage': coverage,
         'allow_cross_step_weak_edges': allow_cross_step_weak_edges,
         'enable_fast_coin': enable_fast_coin,
+        'solid_commit_trigger_on_solid_step': solid_commit_trigger_on_solid_step,
         'enable_commit_recheck': enable_commit_recheck,
         'fast_coin_candidate_threshold': int(fast_coin_candidate_threshold),
         'solid_candidate_threshold': int(solid_candidate_threshold),

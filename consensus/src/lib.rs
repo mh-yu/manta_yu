@@ -169,6 +169,10 @@ struct PendingCommitCheck {
     path: CommitCheckPath,
     leader_round: Round,
     support_round: Round,
+    /// Whether this pending check still requires the candidate-threshold gate
+    /// before leader selection may start. The default wave-start fallback clears
+    /// this gate even if an earlier fast path already created the same pending.
+    candidate_gate_enabled: bool,
     seen_support_certificate_digests: HashSet<Digest>,
 }
 
@@ -292,10 +296,16 @@ impl Consensus {
                 }
             }
             for candidate in candidates {
-                let already_pending = pending_commit_checks
-                    .iter()
-                    .any(|pending| pending.matches(&candidate));
-                if already_pending {
+                if let Some((index, pending)) = pending_commit_checks
+                    .iter_mut()
+                    .enumerate()
+                    .find(|(_, pending)| pending.matches(&candidate))
+                {
+                    // The default wave-start fallback must still re-evaluate the same
+                    // (path, leader_round, support_round) tuple even if an earlier fast path
+                    // already created it. In that case it clears the candidate gate.
+                    pending.candidate_gate_enabled &= candidate.candidate_gate_enabled;
+                    evaluate_pending_indices.push(index);
                     continue;
                 }
                 debug!(
@@ -435,6 +445,7 @@ impl Consensus {
         path: CommitCheckPath,
         leader_round: Round,
         support_round: Round,
+        candidate_gate_enabled: bool,
         state: &State,
     ) -> Option<PendingCommitCheck> {
         if leader_round <= state.last_committed_leader_round {
@@ -445,6 +456,7 @@ impl Consensus {
             path,
             leader_round,
             support_round,
+            candidate_gate_enabled,
             seen_support_certificate_digests: Self::support_certificate_digests(
                 state,
                 support_round,
@@ -471,23 +483,33 @@ impl Consensus {
         if leader_round != 1 && !self.committee.is_solid_wave(leader_round) {
             return None;
         }
-        self.build_pending_commit_check(CommitCheckPath::Solid, leader_round, support_round, state)
+        self.build_pending_commit_check(
+            CommitCheckPath::Solid,
+            leader_round,
+            support_round,
+            true,
+            state,
+        )
     }
 
-    /// Solid-path commit check when activation is aligned to the first round of each new solid wave
-    /// (after the genesis wave): use the last solid-step support round inside the wave that just
-    /// completed.
+    /// Default solid-path fallback: activate on the **first certificate** whose `round` is the
+    /// first round of a new solid wave after genesis — for σ=κ=2 that is the **first round-5
+    /// vertex**, then first vertex of round 9, 13, … Unlike the optional earlier paths, this
+    /// fallback does not wait for any candidate-threshold gate.
     fn solid_pending_commit_check_on_wave_start(
         &self,
         round: Round,
         state: &State,
     ) -> Option<PendingCommitCheck> {
-        let wave = self.committee.solid_wave_length();
         let step_length = self.committee.solid_step_length();
-        if wave == 0 || round <= wave || !self.committee.is_solid_wave(round) {
+        if !self
+            .committee
+            .is_first_round_of_second_or_later_solid_wave(round)
+        {
             return None;
         }
 
+        let wave = self.committee.solid_wave_length();
         let prev_wave_start = round.saturating_sub(wave);
         let prev_wave_end = round - 1;
         let support_round = self.committee.last_solid_step_round_in_closed_range(
@@ -501,7 +523,30 @@ impl Consensus {
         if leader_round != 1 && !self.committee.is_solid_wave(leader_round) {
             return None;
         }
-        self.build_pending_commit_check(CommitCheckPath::Solid, leader_round, support_round, state)
+        self.build_pending_commit_check(
+            CommitCheckPath::Solid,
+            leader_round,
+            support_round,
+            false,
+            state,
+        )
+    }
+
+    fn solid_pending_commit_checks_for_round(
+        &self,
+        round: Round,
+        state: &State,
+    ) -> Vec<PendingCommitCheck> {
+        let mut candidates = Vec::new();
+        if self.committee.solid_commit_trigger_on_solid_step {
+            if let Some(candidate) = self.solid_pending_commit_check_on_solid_step(round, state) {
+                candidates.push(candidate);
+            }
+        }
+        if let Some(candidate) = self.solid_pending_commit_check_on_wave_start(round, state) {
+            candidates.push(candidate);
+        }
+        candidates
     }
 
     fn solid_pending_commit_check_for_round(
@@ -509,11 +554,13 @@ impl Consensus {
         round: Round,
         state: &State,
     ) -> Option<PendingCommitCheck> {
-        if self.committee.solid_commit_trigger_on_solid_step {
-            self.solid_pending_commit_check_on_solid_step(round, state)
-        } else {
-            self.solid_pending_commit_check_on_wave_start(round, state)
-        }
+        self.solid_pending_commit_checks_for_round(round, state)
+            .into_iter()
+            .reduce(|mut merged, candidate| {
+                merged.candidate_gate_enabled &=
+                    candidate.candidate_gate_enabled;
+                merged
+            })
     }
 
     fn fast_coin_pending_commit_check_for_round(
@@ -544,6 +591,7 @@ impl Consensus {
             CommitCheckPath::FastCoin,
             leader_round,
             support_round,
+            true,
             state,
         )
     }
@@ -557,7 +605,7 @@ impl Consensus {
         if let Some(candidate) = self.fast_coin_pending_commit_check_for_round(round, state) {
             candidates.push(candidate);
         }
-        if let Some(candidate) = self.solid_pending_commit_check_for_round(round, state) {
+        for candidate in self.solid_pending_commit_checks_for_round(round, state) {
             candidates.push(candidate);
         }
         candidates
@@ -594,7 +642,7 @@ impl Consensus {
         let support_round = pending.support_round;
 
         let candidate_threshold = self.activation_candidate_threshold(path);
-        if candidate_threshold > 0 {
+        if pending.candidate_gate_enabled && candidate_threshold > 0 {
             let support_round_stake = self.support_round_total_stake(state, support_round);
             let validity_threshold = self.committee.validity_threshold();
             let supported_candidates =

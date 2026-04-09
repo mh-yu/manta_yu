@@ -273,6 +273,10 @@ class LogParser:
             ('Coverage', 'coverage'),
             ('Allow cross-step weak edges', 'allow_cross_step_weak_edges'),
             ('Enable fast coin', 'enable_fast_coin'),
+            (
+                'Solid commit trigger on solid step',
+                'solid_commit_trigger_on_solid_step',
+            ),
             ('Enable commit recheck', 'enable_commit_recheck'),
             ('Fast coin candidate threshold', 'fast_coin_candidate_threshold'),
             ('Solid candidate threshold', 'solid_candidate_threshold'),

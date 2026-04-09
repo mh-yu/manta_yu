@@ -228,9 +228,10 @@ pub struct Committee {
     #[serde(default = "default_solid_candidate_threshold")]
     pub solid_candidate_threshold: usize,
     /// When true, enqueue solid-path commit checks as soon as the round after a solid-step
-    /// support round is observed (legacy). When false (default), enqueue only when the first
-    /// certificate of a new solid-wave round arrives (e.g. round 5 for σ=κ=2); support and
-    /// leader rounds are derived from the last solid-step round inside the completed wave.
+    /// support round is observed (legacy). When false (default), enqueue when the **first**
+    /// certificate in round `solid_wave_length() + 1` arrives (round **5** when σ=κ=2), then the
+    /// same for each subsequent wave (9, 13, …); support/leader rounds come from the last
+    /// solid-step round inside the wave that just ended.
     #[serde(default)]
     pub solid_commit_trigger_on_solid_step: bool,
 }
@@ -388,6 +389,17 @@ impl Committee {
         round > 1 && (round - 1) % self.solid_wave_length() == 0
     }
 
+    /// True if `round` is the first round of a solid wave **after** the genesis wave
+    /// (length [`solid_wave_length`](Self::solid_wave_length)).
+    ///
+    /// When σ=κ=2, wave length is 4: this is exactly round **5**, then 9, 13, …
+    /// Consensus uses this so the **first certificate seen in that round** opens the solid
+    /// commit check (not round 4 or round 6).
+    pub fn is_first_round_of_second_or_later_solid_wave(&self, round: u64) -> bool {
+        let w = self.solid_wave_length();
+        w > 0 && round > w && self.is_solid_wave(round)
+    }
+
     fn overlapping_segment_start_before(round: u64, length: u64) -> u64 {
         if round <= 1 {
             0
@@ -508,6 +520,15 @@ mod tests {
         let committee = overlapping_committee();
         assert_eq!(committee.last_solid_step_round_in_closed_range(1, 4), Some(3));
         assert_eq!(committee.last_solid_step_round_in_closed_range(5, 8), Some(7));
+    }
+
+    #[test]
+    fn first_round_of_second_or_later_solid_wave_matches_round_five_for_default_wave() {
+        let committee = overlapping_committee();
+        assert!(!committee.is_first_round_of_second_or_later_solid_wave(4));
+        assert!(committee.is_first_round_of_second_or_later_solid_wave(5));
+        assert!(!committee.is_first_round_of_second_or_later_solid_wave(6));
+        assert!(committee.is_first_round_of_second_or_later_solid_wave(9));
     }
 
     #[test]

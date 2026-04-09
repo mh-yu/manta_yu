@@ -974,6 +974,10 @@ class CloudLabBench:
             'enable_fast_coin',
             False,
         )
+        solid_commit_trigger_on_solid_step = node_parameters.json.get(
+            'solid_commit_trigger_on_solid_step',
+            False,
+        )
         enable_commit_recheck = node_parameters.json.get(
             'enable_commit_recheck',
             True,
@@ -995,6 +999,7 @@ class CloudLabBench:
             coverage,
             allow_cross_step_weak_edges,
             enable_fast_coin,
+            solid_commit_trigger_on_solid_step,
             enable_commit_recheck,
             fast_coin_candidate_threshold,
             solid_candidate_threshold,

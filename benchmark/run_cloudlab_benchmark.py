@@ -177,6 +177,13 @@ Examples:
                        action='store_false',
                        help='Disable the fast-coin commit path')
     parser.set_defaults(enable_fast_coin=False)
+    parser.add_argument('--solid-commit-trigger-on-solid-step', dest='solid_commit_trigger_on_solid_step',
+                       action='store_true',
+                       help='Use the legacy solid-step trigger for the regular solid commit path instead of opening the check at the first vertex of the next solid wave')
+    parser.add_argument('--no-solid-commit-trigger-on-solid-step', dest='solid_commit_trigger_on_solid_step',
+                       action='store_false',
+                       help='Open the regular solid commit check at the first vertex of the next solid wave (default)')
+    parser.set_defaults(solid_commit_trigger_on_solid_step=False)
     parser.add_argument('--commit-recheck', dest='enable_commit_recheck',
                        action='store_true',
                        help='Enable repeated pending commit checks when late support certificates arrive')
@@ -232,6 +239,7 @@ Examples:
                 'coverage': args.coverage,
                 'allow_cross_step_weak_edges': args.allow_cross_step_weak_edges,
                 'enable_fast_coin': args.enable_fast_coin,
+                'solid_commit_trigger_on_solid_step': args.solid_commit_trigger_on_solid_step,
                 'enable_commit_recheck': args.enable_commit_recheck,
                 'fast_coin_candidate_threshold': args.fast_coin_candidate_threshold,
                 'solid_candidate_threshold': args.solid_candidate_threshold,

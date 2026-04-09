@@ -44,6 +44,7 @@ class Committee:
 
     def __init__(self, addresses, base_port, sigma, kappa, reference, coverage,
                  allow_cross_step_weak_edges=True, enable_fast_coin=False,
+                 solid_commit_trigger_on_solid_step=False,
                  enable_commit_recheck=True, fast_coin_candidate_threshold=0,
                  solid_candidate_threshold=0):
         ''' The `addresses` field looks as follows:
@@ -72,6 +73,7 @@ class Committee:
             'coverage': coverage,
             'allow_cross_step_weak_edges': allow_cross_step_weak_edges,
             'enable_fast_coin': enable_fast_coin,
+            'solid_commit_trigger_on_solid_step': solid_commit_trigger_on_solid_step,
             'enable_commit_recheck': enable_commit_recheck,
             'fast_coin_candidate_threshold': fast_coin_candidate_threshold,
             'solid_candidate_threshold': solid_candidate_threshold,
@@ -168,6 +170,7 @@ class Committee:
 class LocalCommittee(Committee):
     def __init__(self, names, port, workers, sigma, kappa, reference, coverage,
                  allow_cross_step_weak_edges=True, enable_fast_coin=False,
+                 solid_commit_trigger_on_solid_step=False,
                  enable_commit_recheck=True, fast_coin_candidate_threshold=0,
                  solid_candidate_threshold=0):
         assert isinstance(names, list)
@@ -184,6 +187,7 @@ class LocalCommittee(Committee):
             coverage,
             allow_cross_step_weak_edges,
             enable_fast_coin,
+            solid_commit_trigger_on_solid_step,
             enable_commit_recheck,
             fast_coin_candidate_threshold,
             solid_candidate_threshold,

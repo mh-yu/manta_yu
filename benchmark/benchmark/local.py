@@ -35,6 +35,10 @@ class LocalBench:
                 'enable_fast_coin',
                 False,
             )
+            self.solid_commit_trigger_on_solid_step = node_parameters_dict.get(
+                'solid_commit_trigger_on_solid_step',
+                False,
+            )
             self.enable_commit_recheck = node_parameters_dict.get(
                 'enable_commit_recheck',
                 True,
@@ -137,6 +141,7 @@ class LocalBench:
                 self.coverage,
                 self.allow_cross_step_weak_edges,
                 self.enable_fast_coin,
+                self.solid_commit_trigger_on_solid_step,
                 self.enable_commit_recheck,
                 self.fast_coin_candidate_threshold,
                 self.solid_candidate_threshold,

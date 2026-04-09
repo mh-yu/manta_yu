@@ -418,6 +418,7 @@ fn solid_commit_wave_start_skips_solid_step_trigger_round() {
         .expect("first wave boundary after genesis should activate r3/r1 solid check");
     assert_eq!(pending.support_round, 3);
     assert_eq!(pending.leader_round, 1);
+    assert!(!pending.candidate_gate_enabled);
 }
 
 #[tokio::test]
@@ -867,6 +868,7 @@ async fn fast_coin_candidate_threshold_delays_commit_until_enough_candidates() {
 #[tokio::test]
 async fn solid_candidate_threshold_delays_commit_until_enough_candidates() {
     let committee = Committee {
+        solid_commit_trigger_on_solid_step: true,
         solid_candidate_threshold: 2,
         ..mock_committee()
     };
@@ -953,6 +955,7 @@ async fn solid_candidate_threshold_delays_commit_until_enough_candidates() {
     let mut pending = consensus
         .solid_pending_commit_check_for_round(4, &state)
         .expect("round 4 should activate solid pending state");
+    assert!(pending.candidate_gate_enabled);
     let committed = consensus
         .evaluate_pending_commit_check(&mut state, 4, &mut pending)
         .await;
@@ -979,4 +982,147 @@ async fn solid_candidate_threshold_delays_commit_until_enough_candidates() {
     let committed_leader = rx_output.recv().await.unwrap();
     assert_eq!(committed_leader.round(), 1);
     assert_eq!(committed_leader.origin(), leader_author);
+}
+
+#[tokio::test]
+async fn default_wave_start_solid_commit_ignores_candidate_threshold() {
+    let committee = Committee {
+        solid_candidate_threshold: 2,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let genesis_parents = genesis_certs
+        .iter()
+        .map(|certificate| certificate.digest())
+        .collect::<BTreeSet<_>>();
+
+    let leader_author = authorities[0];
+    let supporter_a = authorities[1];
+    let supporter_b = authorities[2];
+
+    let (_, leader_round_1) = mock_certificate(leader_author, 1, genesis_parents.clone());
+    let leader_header_id = leader_round_1.header.id.clone();
+    let mut leader_only = HashSet::new();
+    leader_only.insert(leader_header_id);
+
+    let (_, support_round_3_a) = mock_certificate_with_solid_wave(
+        supporter_a,
+        3,
+        BTreeSet::new(),
+        leader_only.clone(),
+    );
+    let (_, support_round_3_b) = mock_certificate_with_solid_wave(
+        supporter_b,
+        3,
+        BTreeSet::new(),
+        leader_only,
+    );
+    let (_, activation_round_5) =
+        mock_certificate(authorities[3], 5, BTreeSet::from([leader_round_1.digest()]));
+
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(10);
+    let (tx_output, mut rx_output) = channel(10);
+    let mut consensus = Consensus {
+        committee: committee.clone(),
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs.clone(),
+    };
+    tokio::spawn(async move { while rx_primary.recv().await.is_some() {} });
+
+    let mut state = State::new(genesis_certs);
+    state.insert(leader_round_1.clone());
+    state.insert(support_round_3_a.clone());
+    state.insert(support_round_3_b.clone());
+    state.insert(activation_round_5);
+
+    let mut pending = consensus
+        .solid_pending_commit_check_for_round(5, &state)
+        .expect("round 5 should activate the default solid fallback");
+    assert!(!pending.candidate_gate_enabled);
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 5, &mut pending)
+        .await;
+    assert!(
+        committed,
+        "default round-5 solid fallback should ignore solid candidate threshold once support stake is sufficient"
+    );
+
+    let committed_leader = rx_output.recv().await.unwrap();
+    assert_eq!(committed_leader.round(), 1);
+    assert_eq!(committed_leader.origin(), leader_author);
+}
+
+#[test]
+fn wave_start_fallback_clears_candidate_gate_for_existing_solid_pending() {
+    let committee = Committee {
+        solid_commit_trigger_on_solid_step: true,
+        solid_candidate_threshold: 2,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let genesis_parents = genesis_certs
+        .iter()
+        .map(|certificate| certificate.digest())
+        .collect::<BTreeSet<_>>();
+
+    let (_, leader_round_1) = mock_certificate(authorities[0], 1, genesis_parents.clone());
+    let (_, activation_round_4) =
+        mock_certificate(authorities[1], 4, BTreeSet::from([leader_round_1.digest()]));
+    let (_, activation_round_5) =
+        mock_certificate(authorities[2], 5, BTreeSet::from([leader_round_1.digest()]));
+
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, _rx_primary) = channel(10);
+    let (tx_output, _rx_output) = channel(10);
+    let consensus = Consensus {
+        committee,
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs.clone(),
+    };
+
+    let mut state = State::new(genesis_certs);
+    state.insert(leader_round_1);
+    state.insert(activation_round_4);
+
+    let mut pending = consensus
+        .solid_pending_commit_check_for_round(4, &state)
+        .expect("round 4 should activate the early solid-step path");
+    assert!(pending.candidate_gate_enabled);
+
+    state.insert(activation_round_5);
+    let fallback_pending = consensus
+        .solid_pending_commit_check_for_round(5, &state)
+        .expect("round 5 should still activate the default solid fallback");
+    assert!(!fallback_pending.candidate_gate_enabled);
+
+    pending.candidate_gate_enabled &= fallback_pending.candidate_gate_enabled;
+    assert!(
+        !pending.candidate_gate_enabled,
+        "the default round-5 fallback must clear the earlier solid candidate gate"
+    );
 }
