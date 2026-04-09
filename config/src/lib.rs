@@ -227,6 +227,12 @@ pub struct Committee {
     /// on the regular solid support round before the solid path starts leader selection.
     #[serde(default = "default_solid_candidate_threshold")]
     pub solid_candidate_threshold: usize,
+    /// When true, enqueue solid-path commit checks as soon as the round after a solid-step
+    /// support round is observed (legacy). When false (default), enqueue only when the first
+    /// certificate of a new solid-wave round arrives (e.g. round 5 for σ=κ=2); support and
+    /// leader rounds are derived from the last solid-step round inside the completed wave.
+    #[serde(default)]
+    pub solid_commit_trigger_on_solid_step: bool,
 }
 
 impl Import for Committee {}
@@ -400,6 +406,23 @@ impl Committee {
         Self::overlapping_segment_start_before(round, self.solid_wave_length())
     }
 
+    /// Returns the greatest round `r` in `[low, high]` such that `is_solid_step(r)`, if any.
+    pub fn last_solid_step_round_in_closed_range(&self, low: u64, high: u64) -> Option<u64> {
+        if low > high {
+            return None;
+        }
+        let mut r = high;
+        loop {
+            if self.is_solid_step(r) {
+                return Some(r);
+            }
+            if r <= low {
+                return None;
+            }
+            r -= 1;
+        }
+    }
+
     /// Returns the first round allowed for weak parents that extend beyond the
     /// current strong-parent round. When cross-step weak edges are disabled, we
     /// clamp the weak-parent window to the current solid step.
@@ -476,7 +499,15 @@ mod tests {
             enable_commit_recheck: true,
             fast_coin_candidate_threshold: 0,
             solid_candidate_threshold: 0,
+            solid_commit_trigger_on_solid_step: false,
         }
+    }
+
+    #[test]
+    fn last_solid_step_round_in_closed_range_matches_waves() {
+        let committee = overlapping_committee();
+        assert_eq!(committee.last_solid_step_round_in_closed_range(1, 4), Some(3));
+        assert_eq!(committee.last_solid_step_round_in_closed_range(5, 8), Some(7));
     }
 
     #[test]

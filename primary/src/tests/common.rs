@@ -72,6 +72,7 @@ pub fn committee() -> Committee {
         enable_commit_recheck: true,
         fast_coin_candidate_threshold: 0,
         solid_candidate_threshold: 0,
+        solid_commit_trigger_on_solid_step: false,
     }
 }
 

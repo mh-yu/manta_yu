@@ -42,6 +42,7 @@ pub fn mock_committee() -> Committee {
         enable_commit_recheck: true,
         fast_coin_candidate_threshold: 0,
         solid_candidate_threshold: 0,
+        solid_commit_trigger_on_solid_step: true,
     }
 }
 
@@ -372,6 +373,51 @@ async fn missing_leader() {
     }
     let certificate = rx_output.recv().await.unwrap();
     assert_eq!(certificate.round(), 4);
+}
+
+#[test]
+fn solid_commit_wave_start_skips_solid_step_trigger_round() {
+    let committee = Committee {
+        solid_commit_trigger_on_solid_step: false,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let genesis_parents = genesis_certs
+        .iter()
+        .map(|certificate| certificate.digest())
+        .collect::<BTreeSet<_>>();
+
+    let (_, leader_round_1) = mock_certificate(authorities[0], 1, genesis_parents);
+    let mut state = State::new(genesis_certs.clone());
+    state.insert(leader_round_1);
+
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, _rx_primary) = channel(10);
+    let (tx_output, _rx_output) = channel(10);
+    let consensus = Consensus {
+        committee,
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs,
+    };
+
+    assert!(consensus.solid_pending_commit_check_for_round(4, &state).is_none());
+    let pending = consensus
+        .solid_pending_commit_check_for_round(5, &state)
+        .expect("first wave boundary after genesis should activate r3/r1 solid check");
+    assert_eq!(pending.support_round, 3);
+    assert_eq!(pending.leader_round, 1);
 }
 
 #[tokio::test]

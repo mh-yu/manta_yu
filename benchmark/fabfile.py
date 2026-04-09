@@ -259,7 +259,7 @@ def cloudlab_remote(
     fast_coin_candidate_threshold=4,
     solid_candidate_threshold=4,
     enable_adaptive_intermediate_spill=True,
-    adaptive_intermediate_spill_trigger_digests=2,
+    adaptive_intermediate_spill_trigger_digests=1,
     adaptive_intermediate_spill_cap_digests=1,
     design_tag='manta_final_80ms',
 ):

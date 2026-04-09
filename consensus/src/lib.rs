@@ -452,7 +452,7 @@ impl Consensus {
         })
     }
 
-    fn solid_pending_commit_check_for_round(
+    fn solid_pending_commit_check_on_solid_step(
         &self,
         round: Round,
         state: &State,
@@ -472,6 +472,48 @@ impl Consensus {
             return None;
         }
         self.build_pending_commit_check(CommitCheckPath::Solid, leader_round, support_round, state)
+    }
+
+    /// Solid-path commit check when activation is aligned to the first round of each new solid wave
+    /// (after the genesis wave): use the last solid-step support round inside the wave that just
+    /// completed.
+    fn solid_pending_commit_check_on_wave_start(
+        &self,
+        round: Round,
+        state: &State,
+    ) -> Option<PendingCommitCheck> {
+        let wave = self.committee.solid_wave_length();
+        let step_length = self.committee.solid_step_length();
+        if wave == 0 || round <= wave || !self.committee.is_solid_wave(round) {
+            return None;
+        }
+
+        let prev_wave_start = round.saturating_sub(wave);
+        let prev_wave_end = round - 1;
+        let support_round = self.committee.last_solid_step_round_in_closed_range(
+            prev_wave_start,
+            prev_wave_end,
+        )?;
+        let leader_round = support_round.saturating_sub(step_length);
+        if leader_round < 1 {
+            return None;
+        }
+        if leader_round != 1 && !self.committee.is_solid_wave(leader_round) {
+            return None;
+        }
+        self.build_pending_commit_check(CommitCheckPath::Solid, leader_round, support_round, state)
+    }
+
+    fn solid_pending_commit_check_for_round(
+        &self,
+        round: Round,
+        state: &State,
+    ) -> Option<PendingCommitCheck> {
+        if self.committee.solid_commit_trigger_on_solid_step {
+            self.solid_pending_commit_check_on_solid_step(round, state)
+        } else {
+            self.solid_pending_commit_check_on_wave_start(round, state)
+        }
     }
 
     fn fast_coin_pending_commit_check_for_round(
