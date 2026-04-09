@@ -46,6 +46,8 @@ struct State {
     slow_path_pending_round: Option<Round>,
     /// Rounds that have been buffered by fast path (undecided > 0).
     buffered_rounds: HashSet<Round>,
+    /// Rounds already evaluated by fast path (enforce one check per round).
+    fast_path_checked_rounds: HashSet<Round>,
 }
 
 impl State {
@@ -60,6 +62,7 @@ impl State {
             digest_index: HashMap::new(),
             slow_path_pending_round: None,
             buffered_rounds: HashSet::new(),
+            fast_path_checked_rounds: HashSet::new(),
         };
 
         for certificate in genesis {
@@ -305,6 +308,9 @@ impl Consensus {
         if round == 0 {
             return false;
         }
+        if state.fast_path_checked_rounds.contains(&round) {
+            return false;
+        }
         let Some(current_round_map) = state.dag.get(&round) else {
             return false;
         };
@@ -333,6 +339,9 @@ impl Consensus {
             .values()
             .map(|(_, cert, _)| cert.clone())
             .collect();
+
+        // From this point, we count this round as checked exactly once.
+        state.fast_path_checked_rounds.insert(round);
 
         let threshold = self.committee.quorum_threshold();
         let mut decide_one = Vec::new();
