@@ -245,12 +245,12 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2):
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'rate': [40000],
+        'rate': [20000],
         # 'rate': [40000, 60000, 80000, 100000, 120000, 140000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 1,
-        'network_tag': 'geo_5',
+        'runs': 2,
+        'network_tag': 'no-delay',
     }
     node_params = {
         'header_size': 1_000,  # bytes
