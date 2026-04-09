@@ -31,6 +31,8 @@ struct State {
     last_committed_round: Round,
     /// The round of the last leader whose commit path was accepted.
     last_committed_leader_round: Round,
+    /// Last committed round per authority; used to avoid skipping uncommitted holes.
+    last_committed: HashMap<PublicKey, Round>,
     /// Keeps the latest committed certificate (and its parents) for every authority. Anything older
     /// must be regularly cleaned up through the function `update`.
     dag: Dag,
@@ -49,6 +51,7 @@ impl State {
         let mut state = Self {
             last_committed_round: 0,
             last_committed_leader_round: 0,
+            last_committed: HashMap::new(),
             dag: HashMap::new(),
             certificate_index: HashMap::new(),
             digest_index: HashMap::new(),
@@ -59,6 +62,14 @@ impl State {
         for certificate in genesis {
             state.insert(certificate);
         }
+
+        state.last_committed = state
+            .dag
+            .get(&0)
+            .into_iter()
+            .flat_map(|genesis_round| genesis_round.iter())
+            .map(|(author, (_, certificate, _))| (*author, certificate.round()))
+            .collect();
 
         state
     }
@@ -107,6 +118,10 @@ impl State {
 
     /// Record that a certificate has been committed without cleaning the DAG yet.
     fn record_commit(&mut self, certificate: &Certificate) {
+        self.last_committed
+            .entry(certificate.origin())
+            .and_modify(|r| *r = max(*r, certificate.round()))
+            .or_insert_with(|| certificate.round());
         self.last_committed_round = max(self.last_committed_round, certificate.round());
     }
 
@@ -578,7 +593,10 @@ impl Consensus {
         let mut buffer = vec![leader];
         while let Some(x) = buffer.pop() {
             let x_digest = x.digest();
-            let already_committed = x.round() <= state.last_committed_round;
+            let already_committed = state
+                .last_committed
+                .get(&x.origin())
+                .map_or(false, |r| *r >= x.round());
             if already_ordered.contains(&x_digest) || already_committed {
                 continue;
             }
@@ -600,7 +618,10 @@ impl Consensus {
                 // We skip the certificate if we (1) already processed it or (2) we reached a round that we already
                 // committed for this authority.
                 let mut skip = already_ordered.contains(digest);
-                skip |= certificate.round() <= state.last_committed_round;
+                skip |= state
+                    .last_committed
+                    .get(&certificate.origin())
+                    .map_or(false, |r| *r >= certificate.round());
                 if !skip {
                     buffer.push(certificate);
                 }
