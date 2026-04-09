@@ -6,6 +6,7 @@ This module provides functionality to run benchmarks on CloudLab nodes.
 """
 
 from collections import OrderedDict
+from datetime import datetime
 from pathlib import Path
 from fabric import Connection, ThreadingGroup as Group
 from fabric.exceptions import GroupException
@@ -91,6 +92,97 @@ class CloudLabBench:
         else:
             if output.stderr:
                 raise ExecutionError(output.stderr)
+
+    @staticmethod
+    def _sanitize_network_tag(network_tag):
+        tag = re.sub(r'[^A-Za-z0-9._-]+', '_', str(network_tag).strip())
+        return tag or 'default'
+
+    def _tag_results_dir(self, network_tag):
+        benchmark_dir = Path(__file__).parent.parent
+        tag_dir = benchmark_dir / PathMaker.results_path() / self._sanitize_network_tag(network_tag)
+        tag_dir.mkdir(parents=True, exist_ok=True)
+        return tag_dir
+
+    @staticmethod
+    def _bench_result_filename(faults, nodes, workers, collocate, rate, tx_size):
+        return f'bench-{faults}-{nodes}-{workers}-{collocate}-{rate}-{tx_size}.txt'
+
+    def _tagged_bench_result_filename(self, network_tag, faults, nodes, workers, collocate, rate, tx_size):
+        tag = self._sanitize_network_tag(network_tag)
+        return (
+            f'bench-{tag}-{faults}-{nodes}-{workers}-{collocate}-{rate}-{tx_size}.txt'
+        )
+
+    def _run_artifact_filename(self, prefix, network_tag, rate, suffix='txt'):
+        tag = self._sanitize_network_tag(network_tag)
+        return f'{prefix}-{tag}-rate-{rate}.{suffix}'
+
+    def _create_run_dir(self, network_tag, nodes, rate, run_index, total_runs, trigger_attack):
+        tag_dir = self._tag_results_dir(network_tag)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        attack_suffix = ''
+        if trigger_attack is not None:
+            attack_suffix = f"-attack-{'on' if trigger_attack else 'off'}"
+        run_dir = tag_dir / (
+            f'run-{timestamp}-n{nodes}-r{rate}-run{run_index+1}-of-{total_runs}{attack_suffix}'
+        )
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir
+
+    def _write_run_artifacts(
+        self,
+        run_dir,
+        result,
+        bench_parameters,
+        nodes,
+        rate,
+        run_index,
+        trigger_attack,
+        network_tag,
+    ):
+        summary_path = run_dir / self._run_artifact_filename(
+            'summary', network_tag, rate
+        )
+        summary_text = (
+            f'network_tag: {self._sanitize_network_tag(network_tag)}\n'
+            f'run_index: {run_index + 1}/{bench_parameters.runs}\n'
+            f'nodes: {nodes}\n'
+            f'rate: {rate}\n'
+            f'workers: {bench_parameters.workers}\n'
+            f'faults: {bench_parameters.faults}\n'
+            f'collocate: {bench_parameters.collocate}\n'
+            f'tx_size: {bench_parameters.tx_size}\n'
+            f"trigger_attack: {trigger_attack if trigger_attack is not None else 'N/A'}\n"
+            '\n'
+            f'{result.result()}'
+        )
+        summary_path.write_text(summary_text)
+
+        stats_script = Path(__file__).parent.parent / 'extract_valence_stats.py'
+        stats_output = run_dir / self._run_artifact_filename(
+            'valence-stats', network_tag, rate
+        )
+        if not stats_script.exists():
+            Print.warn(f'Valence stats script not found: {stats_script}')
+            return
+
+        try:
+            import sys
+
+            stats_result = subprocess.run(
+                [sys.executable, str(stats_script), '--out', str(stats_output)],
+                cwd=str(Path(__file__).parent.parent),
+                capture_output=True,
+                text=True,
+            )
+            if stats_result.returncode != 0:
+                raise RuntimeError(
+                    f'extract_valence_stats.py exited with code {stats_result.returncode}: '
+                    f'{stats_result.stderr.strip()}'
+                )
+        except Exception as e:
+            Print.warn(f'Failed to generate valence stats: {e}')
     
     def _get_connection_kwargs(self, host_info):
         """Get connection kwargs for a specific host (without port/timeout, passed separately)"""
@@ -1485,6 +1577,9 @@ SCRIPTEOF'''
         """
         assert isinstance(debug, bool)
         Print.heading('Starting CloudLab benchmark')
+        network_tag = self._sanitize_network_tag(
+            bench_parameters_dict.get('network_tag', 'default')
+        )
         
         # Extract trigger_attack from bench_parameters_dict (optional)
         # Support both single value and list (like rate and nodes)
@@ -1500,7 +1595,11 @@ SCRIPTEOF'''
         
         # Remove trigger_attack from dict before creating BenchParameters
         # (since it's not a standard parameter)
-        bench_params_for_parsing = {k: v for k, v in bench_parameters_dict.items() if k != 'trigger_attack'}
+        bench_params_for_parsing = {
+            k: v
+            for k, v in bench_parameters_dict.items()
+            if k not in ('trigger_attack', 'network_tag')
+        }
         
         try:
             bench_parameters = BenchParameters(bench_params_for_parsing)
@@ -1562,6 +1661,36 @@ SCRIPTEOF'''
                                 rate,
                                 bench_parameters.tx_size,
                             ))
+                            tag_result_file = self._tag_results_dir(network_tag) / self._tagged_bench_result_filename(
+                                network_tag,
+                                bench_parameters.faults,
+                                n,
+                                bench_parameters.workers,
+                                bench_parameters.collocate,
+                                rate,
+                                bench_parameters.tx_size,
+                            )
+                            result.print(str(tag_result_file))
+
+                            run_dir = self._create_run_dir(
+                                network_tag,
+                                n,
+                                rate,
+                                run,
+                                bench_parameters.runs,
+                                trigger_attack,
+                            )
+                            self._write_run_artifacts(
+                                run_dir,
+                                result,
+                                bench_parameters,
+                                n,
+                                rate,
+                                run,
+                                trigger_attack,
+                                network_tag,
+                            )
+                            Print.info(f'Per-run artifacts saved to: {run_dir}')
                         except (subprocess.SubprocessError, GroupException, ParseError) as e:
                             self.kill(hosts=selected_hosts)
                             if isinstance(e, GroupException):
