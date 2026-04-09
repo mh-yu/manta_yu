@@ -290,6 +290,8 @@ class LogParser:
                 'adaptive_intermediate_spill_cap_digests',
             ),
             ('Design tag', 'design_tag'),
+            ('Network tag', 'network_tag'),
+            ('Load tag', 'load_tag'),
         ):
             value = node_params.get(key)
             if value is not None:

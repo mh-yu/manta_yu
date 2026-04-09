@@ -1584,6 +1584,8 @@ SCRIPTEOF'''
                         
                         try:
                             design_tag = node_parameters.json.get('design_tag')
+                            network_tag = node_parameters.json.get('network_tag')
+                            load_tag = node_parameters.json.get('load_tag')
                             run_label = f'cloudlab-n{n}-r{rate}-run{run+1}'
                             if design_tag:
                                 run_label += f'-tag-{design_tag}'
@@ -1592,6 +1594,8 @@ SCRIPTEOF'''
                             run_dir = PathMaker.create_run_directory(
                                 run_label,
                                 design_tag=design_tag,
+                                network_tag=network_tag,
+                                load_tag=load_tag,
                             )
                             PathMaker.update_run_metadata(
                                 {
@@ -1625,6 +1629,8 @@ SCRIPTEOF'''
                                             'adaptive_intermediate_spill_trigger_digests',
                                             'adaptive_intermediate_spill_cap_digests',
                                             'design_tag',
+                                            'network_tag',
+                                            'load_tag',
                                         )
                                     },
                                 },

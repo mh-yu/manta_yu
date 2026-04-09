@@ -359,6 +359,8 @@ class Bench:
                         run_dir = PathMaker.create_run_directory(
                             f'remote-n{n}-r{r}-run{i+1}',
                             design_tag=node_parameters.json.get('design_tag'),
+                            network_tag=node_parameters.json.get('network_tag'),
+                            load_tag=node_parameters.json.get('load_tag'),
                         )
                         Print.info(f'Run outputs directory: {run_dir}')
                         self._run_single(

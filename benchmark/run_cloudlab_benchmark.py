@@ -208,6 +208,10 @@ Examples:
                        help='Maximum number of digests to keep in the intermediate spill window before routing new digests back to the critical queue')
     parser.add_argument('--design-tag', default='manta',
                        help='Design tag written to summary and run directory name (default: manta)')
+    parser.add_argument('--network-tag', default='default_network',
+                       help='Network tag used in the output directory hierarchy and summary (default: default_network)')
+    parser.add_argument('--load-tag', default='default_load',
+                       help='Load tag used in the output directory hierarchy and summary (default: default_load)')
     
     args = parser.parse_args()
     
@@ -224,6 +228,8 @@ Examples:
             run_dir = PathMaker.create_run_directory(
                 'cloudlab-manual',
                 design_tag=args.design_tag,
+                network_tag=args.network_tag,
+                load_tag=args.load_tag,
             )
             Print.info(f'Run outputs directory: {run_dir}')
     
@@ -247,6 +253,8 @@ Examples:
                 'adaptive_intermediate_spill_trigger_digests': args.adaptive_intermediate_spill_trigger_digests,
                 'adaptive_intermediate_spill_cap_digests': args.adaptive_intermediate_spill_cap_digests,
                 'design_tag': args.design_tag,
+                'network_tag': args.network_tag,
+                'load_tag': args.load_tag,
             },
         )
         if not success:

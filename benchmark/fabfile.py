@@ -264,6 +264,8 @@ def cloudlab_remote(
     adaptive_intermediate_spill_trigger_digests=2,
     adaptive_intermediate_spill_cap_digests=1,
     design_tag='manta_final_ablation',
+    network_tag='80ms',
+    load_tag='balanced',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
@@ -277,13 +279,13 @@ def cloudlab_remote(
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        # 'rate': [20000,40000,60000,80000,100000,120000,140000],
-        'rate': [100000],
+        'rate': [20000,40000,60000,80000,100000,120000,140000],
+        # 'rate': [100000],
         # 'rate': [40000,80000,100000,120000,140000,150000,160000,180000],
         # 'rate': [130000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 1,       
+        'runs': 3,       
     }
     node_params = {
         'header_size': 1_000,  # bytes
@@ -307,6 +309,8 @@ def cloudlab_remote(
         'adaptive_intermediate_spill_trigger_digests': int(adaptive_intermediate_spill_trigger_digests),
         'adaptive_intermediate_spill_cap_digests': int(adaptive_intermediate_spill_cap_digests),
         'design_tag': design_tag,
+        'network_tag': network_tag,
+        'load_tag': load_tag,
         # 's': 0.99,
     }
     try:

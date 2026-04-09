@@ -52,6 +52,8 @@ class LocalBench:
                 0,
             )
             self.design_tag = node_parameters_dict.get('design_tag')
+            self.network_tag = node_parameters_dict.get('network_tag')
+            self.load_tag = node_parameters_dict.get('load_tag')
         except ConfigError as e:
             raise BenchError('Invalid nodes or bench parameters', e)
 
@@ -106,6 +108,8 @@ class LocalBench:
             run_dir = PathMaker.create_run_directory(
                 f'local-n{nodes}-r{rate}',
                 design_tag=self.design_tag,
+                network_tag=self.network_tag,
+                load_tag=self.load_tag,
             )
             Print.info(f'Run outputs directory: {run_dir}')
 
