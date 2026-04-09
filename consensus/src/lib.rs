@@ -2,7 +2,7 @@
 use config::{Committee, Stake};
 use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
-use log::{debug, info, warn};
+use log::{debug, info, log_enabled, warn};
 use primary::{Certificate, Round};
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
@@ -29,6 +29,8 @@ type DagPosition = (Round, PublicKey);
 struct State {
     /// The highest round among all committed certificates. This is used for GC only.
     last_committed_round: Round,
+    /// The round of the last leader whose commit path was accepted.
+    last_committed_leader_round: Round,
     /// Keeps the latest committed certificate (and its parents) for every authority. Anything older
     /// must be regularly cleaned up through the function `update`.
     dag: Dag,
@@ -44,6 +46,7 @@ impl State {
     fn new(genesis: Vec<Certificate>) -> Self {
         let mut state = Self {
             last_committed_round: 0,
+            last_committed_leader_round: 0,
             dag: HashMap::new(),
             certificate_index: HashMap::new(),
             digest_index: HashMap::new(),
@@ -136,6 +139,10 @@ impl State {
         {
             *current_status = status;
         }
+    }
+
+    fn update_last_committed_leader(&mut self, leader_round: Round) {
+        self.last_committed_leader_round = max(self.last_committed_leader_round, leader_round);
     }
 }
 
@@ -353,117 +360,213 @@ impl Consensus {
         }
     }
 
-    async fn slow_path(&self, current_round: Round, state: &mut State) -> bool {
-        let Some(round) = state.slow_path_pending_round else {
-            return false;
-        };
-        if round == 0 || round <= state.last_committed_round {
-            state.slow_path_pending_round = None;
+    async fn slow_path(&self, round: Round, state: &mut State) -> bool {
+        let step_length = self.committee.solid_step_length();
+        let wave_length = self.committee.solid_wave_length();
+        if step_length == 0 || wave_length == 0 || round < step_length {
             return false;
         }
 
-        let step_length = self.committee.solid_step_length().max(1);
-        let support_round = round + 1;
-        let leader_round = round + 2 * step_length;
-        if leader_round > current_round {
+        let r = round - step_length;
+        if r % wave_length != 0 {
+            return false;
+        }
+        if r < 2 * wave_length {
             return false;
         }
 
-        let Some((leader_digest, leader_cert, _)) = self.leader(leader_round, &state.dag) else {
+        let leader_round = r - wave_length;
+        let support_round = r - step_length;
+        if leader_round <= state.last_committed_leader_round {
+            debug!(
+                "Skipping leader_round {} because last_committed_leader_round={}",
+                leader_round, state.last_committed_leader_round
+            );
             return false;
+        }
+
+        let (leader_digest, leader) = match self.leader(leader_round, &state.dag) {
+            Some((digest, cert, _status)) => (digest.clone(), cert.clone()),
+            None => {
+                debug!(
+                    "No leader in DAG for leader_round {} (support_round={})",
+                    leader_round, support_round
+                );
+                return false;
+            }
         };
-        let leader = leader_cert.clone();
-        let leader_digest = leader_digest.clone();
+
+        let leader_header_id = leader.header.id.clone();
+        if log_enabled!(log::Level::Debug) {
+            let header_pos = self.find_certificate_in_dag(state, &leader_header_id);
+            let cert_pos = self.find_certificate_in_dag(state, &leader_digest);
+
+            debug!(
+                "Commit validity check: round={}, leader_round={}, support_round={}. leader_header_id={:?} -> {:?} (node_id={}); leader_digest(cert)= {:?} -> {:?} (node_id={})",
+                round,
+                leader_round,
+                support_round,
+                leader_header_id,
+                header_pos.as_ref().map(|(rd, _)| rd),
+                header_pos.map(|(_, a)| self.author_to_node_id(a)).unwrap_or(999),
+                leader_digest,
+                cert_pos.as_ref().map(|(rd, _)| rd),
+                cert_pos.map(|(_, a)| self.author_to_node_id(a)).unwrap_or(999),
+            );
+        }
 
         let Some(support_round_map) = state.dag.get(&support_round) else {
+            debug!(
+                "Skipping leader_round {} because support_round {} is missing from the DAG",
+                leader_round, support_round
+            );
             return false;
         };
-        let support_round_certificates: Vec<Certificate> = support_round_map
-            .values()
-            .map(|(_, cert, _)| cert.clone())
-            .collect();
-        let support_round_stake: Stake = support_round_certificates
-            .iter()
-            .map(|x| self.committee.stake(&x.origin()))
-            .sum();
-        if support_round_stake < self.committee.quorum_threshold() {
-            return false;
+
+        let debug_logging = log_enabled!(log::Level::Debug);
+        let mut support_nodes = Vec::new();
+        let mut support_entries: Option<Vec<String>> = if debug_logging {
+            Some(Vec::with_capacity(support_round_map.len()))
+        } else {
+            None
+        };
+        let mut stake = 0;
+        for (_, certificate, _status) in support_round_map.values() {
+            let vertices = &certificate.header.solid_wave_vertices;
+            let supports =
+                vertices.contains(&leader_header_id) || vertices.contains(&leader_digest);
+            let node_id = self.author_to_node_id(certificate.origin());
+
+            if supports {
+                support_nodes.push(node_id);
+                stake += self.committee.stake(&certificate.origin());
+            }
+
+            if let Some(entries) = support_entries.as_mut() {
+                entries.push(format!(
+                    "[{},{}]:support={} solid=[{}] merged=[{}]",
+                    certificate.round(),
+                    node_id,
+                    supports,
+                    self.render_digest_set(state, &certificate.header.solid_wave_vertices),
+                    self.render_digest_set(state, &certificate.header.solid_wave_vertices_merged),
+                ));
+            }
         }
 
-        let Some(target_round_map) = state.dag.get(&round) else {
-            return false;
-        };
-        let target_round_certificates: Vec<Certificate> = target_round_map
-            .values()
-            .map(|(_, cert, _)| cert.clone())
-            .collect();
-
-        let mut decide_one = Vec::new();
-        let mut decide_zero = Vec::new();
+        support_nodes.sort_unstable();
         let threshold = self.committee.validity_threshold();
-        for certificate in target_round_certificates {
-            let status = state
-                .dag
-                .get(&certificate.round())
-                .and_then(|m| m.get(&certificate.origin()))
-                .map(|(_, _, s)| *s)
-                .unwrap_or(CommitStatus::Pending);
-            if status == CommitStatus::OneValent {
-                decide_one.push(certificate.clone());
-                continue;
-            }
-            if status == CommitStatus::ZeroValent {
-                decide_zero.push(certificate.clone());
-                continue;
-            }
+        let leader_node = self.author_to_node_id(leader.origin());
+        if stake < threshold {
+            info!(
+                "DAG_COMMIT_CHECK path=solid leader_round={} leader_node={} support_round={} support_basis=solid_wave_vertices stake={} threshold={} result=insufficient_stake support_set={:?}",
+                leader_round,
+                leader_node,
+                support_round,
+                stake,
+                threshold,
+                support_nodes
+            );
+            if log_enabled!(log::Level::Debug) && stake == 0 {
+                debug!(
+                    "Validity stake=0 detail: leader_round={}, support_round={}, leader_header_id={:?}, leader_digest(cert)={:?}",
+                    leader_round, support_round, leader_header_id, leader_digest
+                );
 
-            let candidate_header_id = certificate.header.id.clone();
-            let candidate_digest = certificate.digest();
-            let connected_stake: Stake = support_round_certificates
-                .iter()
-                .filter(|x| {
-                    x.header.solid_step_vertices.contains(&candidate_header_id)
-                        || x.header.solid_step_vertices.contains(&candidate_digest)
-                })
-                .filter(|x| self.linked(x, &leader, state))
-                .map(|x| self.committee.stake(&x.origin()))
-                .sum();
+                if let Some(round_map) = state.dag.get(&support_round) {
+                    let mut certs: Vec<_> = round_map.values().collect();
+                    certs.sort_by_key(|(_, cert, _)| self.author_to_node_id(cert.origin()));
 
-            if connected_stake >= threshold {
-                state.set_commit_status(&certificate, CommitStatus::OneValent);
-                decide_one.push(certificate);
-            } else {
-                state.set_commit_status(&certificate, CommitStatus::ZeroValent);
-                decide_zero.push(certificate);
+                    for (cert_digest, cert, _status) in certs {
+                        let node_id = self.author_to_node_id(cert.origin());
+                        let vertices = &cert.header.solid_wave_vertices;
+
+                        let contains_leader_header = vertices.contains(&leader_header_id);
+                        let contains_leader_digest = vertices.contains(&leader_digest);
+
+                        let mut resolved: Vec<String> = Vec::with_capacity(vertices.len());
+                        for d in vertices {
+                            if let Some((rd, a)) = self.find_certificate_in_dag(state, d) {
+                                let nid = self.author_to_node_id(a);
+                                resolved.push(format!("[{},{}]", rd, nid));
+                            } else {
+                                resolved.push("[?,?]".to_string());
+                            }
+                        }
+                        resolved.sort();
+
+                        debug!(
+                            "support_round cert: node={} cert_round={} cert_digest={:?} base_len={} contains(leader_header_id)={} contains(leader_digest)={} vertices={}",
+                            node_id,
+                            cert.round(),
+                            cert_digest,
+                            vertices.len(),
+                            contains_leader_header,
+                            contains_leader_digest,
+                            resolved.join(", ")
+                        );
+                    }
+                } else {
+                    debug!(
+                        "Validity stake=0 detail: support_round {} missing from local DAG",
+                        support_round
+                    );
+                }
             }
+            debug!(
+                "Current stake is {}. Leader {:?} does not have enough support",
+                stake, leader
+            );
+            if let Some(entries) = support_entries {
+                debug!(
+                    "DAG_COMMIT_SUPPORT leader_round={} support_round={} detail={}",
+                    leader_round,
+                    support_round,
+                    entries.join(" | ")
+                );
+            }
+            return false;
         }
 
         info!(
-            "SLOW_PATH_CHECK round={} leader_round={} leader_node={} threshold={} decide_zero={} decide_one={} leader_digest={:?}",
-            round,
+            "DAG_COMMIT_CHECK path=solid leader_round={} leader_node={} support_round={} support_basis=solid_wave_vertices stake={} threshold={} result=committed support_set={:?}",
             leader_round,
-            self.author_to_node_id(leader.origin()),
+            leader_node,
+            support_round,
+            stake,
             threshold,
-            decide_zero.len(),
-            decide_one.len(),
-            leader_digest
+            support_nodes
         );
-
-        let to_commit = self.collect_fast_path_commits(&decide_one, state);
-        let mut committed = Vec::new();
-        for certificate in to_commit {
-            state.record_commit(&certificate);
-            committed.push(certificate);
+        if let Some(entries) = support_entries {
+            debug!(
+                "DAG_COMMIT_SUPPORT leader_round={} support_round={} detail={}",
+                leader_round,
+                support_round,
+                entries.join(" | ")
+            );
         }
-        if committed.is_empty() {
+
+        let mut sequence = Vec::new();
+        for leader in self.order_leaders(&leader, state).iter().rev() {
+            for x in self.order_dag(leader, state) {
+                state.record_commit(&x);
+                sequence.push(x);
+            }
+        }
+
+        if sequence.is_empty() {
             return false;
         }
 
+        state.update_last_committed_leader(leader_round);
         state.cleanup_committed_history(self.gc_depth);
-        if state.last_committed_round >= round {
+        if state
+            .slow_path_pending_round
+            .map_or(false, |pending| pending <= state.last_committed_round)
+        {
             state.slow_path_pending_round = None;
         }
-        self.emit_commits("slow", committed).await;
+        self.emit_commits("slow", sequence).await;
         true
     }
 
@@ -488,6 +591,31 @@ impl Consensus {
 
         // Return its certificate and the certificate's digest.
         dag.get(&round).map(|x| x.get(&leader)).flatten()
+    }
+
+    fn order_leaders(&self, leader: &Certificate, state: &State) -> Vec<Certificate> {
+        let wave = self.committee.solid_wave_length() as usize;
+        if wave == 0 {
+            return vec![leader.clone()];
+        }
+
+        let start = state
+            .last_committed_leader_round
+            .saturating_add(wave as u64);
+        let end_round = leader.round();
+        let mut to_commit = vec![leader.clone()];
+        let mut cur = leader;
+        for r in (start..end_round).rev().step_by(wave) {
+            let (_, prev_leader, _) = match self.leader(r, &state.dag) {
+                Some(x) => x,
+                None => continue,
+            };
+            if self.linked(cur, prev_leader, state) {
+                to_commit.push(prev_leader.clone());
+                cur = prev_leader;
+            }
+        }
+        to_commit
     }
 
     /// Find a parent certificate by digest in any ancestor round (< child_round).
