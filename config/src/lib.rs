@@ -103,8 +103,8 @@ pub struct Parameters {
     /// The delay after which the workers seal a batch of transactions, even if `max_batch_size`
     /// is not reached. Denominated in ms.
     pub max_batch_delay: u64,
-    /// Whether a multi-worker primary should first fill the critical payload queue and only route
-    /// new digests to the intermediate queue once the critical backlog is large enough.
+    /// Whether the proposer should first fill the critical payload queue and only spill a small
+    /// amount of new digests into the intermediate queue once the critical backlog is large enough.
     #[serde(default = "default_enable_adaptive_intermediate_spill")]
     pub enable_adaptive_intermediate_spill: bool,
 }

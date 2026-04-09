@@ -269,7 +269,7 @@ def cloudlab_remote(
     bench_params = {
         'faults': 0,
         'nodes': [10],
-        'workers': 2,
+        'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
         # 'rate': [20000,40000,60000,80000,100000,120000,140000,160000,180000,200000],

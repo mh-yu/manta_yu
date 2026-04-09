@@ -207,12 +207,14 @@ impl Proposer {
         round == 1 || state.ready_since.elapsed() >= self.parent_grace_delay
     }
 
-    fn uses_dedicated_intermediate_queue(&self) -> bool {
-        self.local_workers > 1
+    fn uses_intermediate_payload_queue(&self) -> bool {
+        self.local_workers > 1 || self.enable_adaptive_intermediate_spill
     }
 
-    fn adaptive_spill_threshold_reached(&self) -> bool {
-        self.critical_payload_size >= 2 * self.header_size
+    fn should_spill_to_intermediate(&self) -> bool {
+        self.enable_adaptive_intermediate_spill
+            && self.critical_payload_size >= 2 * self.header_size
+            && self.intermediate_payload_size < self.header_size
     }
 
     fn next_recheck_deadline(
@@ -224,7 +226,7 @@ impl Proposer {
         let mut next_deadline = std::iter::once(proposal_deadline)
             .chain(critical_payload_deadline.into_iter())
             .chain(
-                self.uses_dedicated_intermediate_queue()
+                self.uses_intermediate_payload_queue()
                     .then_some(intermediate_payload_deadline)
                     .into_iter()
                     .flatten(),
@@ -347,7 +349,7 @@ impl Proposer {
             .min_by_key(|(_, state)| state.unlock_order)
             .map(|(round, _)| *round);
 
-        if !self.uses_dedicated_intermediate_queue() {
+        if !self.uses_intermediate_payload_queue() {
             let critical_has_payload = !self.critical_digests.is_empty();
             let critical_include_payload = critical_has_payload && critical_payload_trigger;
             let critical_eligible = critical_round.is_some()
@@ -433,10 +435,10 @@ impl Proposer {
     }
 
     fn payload_queue_for_worker(&self, worker_id: WorkerId) -> RoundClass {
-        if !self.uses_dedicated_intermediate_queue() {
+        if !self.uses_intermediate_payload_queue() {
             RoundClass::Critical
         } else if self.enable_adaptive_intermediate_spill {
-            if self.adaptive_spill_threshold_reached() {
+            if self.should_spill_to_intermediate() {
                 RoundClass::Intermediate
             } else {
                 RoundClass::Critical
@@ -572,11 +574,11 @@ impl Proposer {
             let now = Instant::now();
             let proposal_timer_expired = now >= proposal_deadline;
             let critical_enough_digests = self.critical_payload_size >= self.header_size;
-            let intermediate_enough_digests = self.uses_dedicated_intermediate_queue()
+            let intermediate_enough_digests = self.uses_intermediate_payload_queue()
                 && self.intermediate_payload_size >= self.header_size;
             let critical_payload_timer_expired =
                 critical_payload_deadline.is_some_and(|deadline| now >= deadline);
-            let intermediate_payload_timer_expired = self.uses_dedicated_intermediate_queue()
+            let intermediate_payload_timer_expired = self.uses_intermediate_payload_queue()
                 && intermediate_payload_deadline.is_some_and(|deadline| now >= deadline);
 
             if let Some(decision) = self.next_proposal_round(
@@ -643,7 +645,7 @@ impl Proposer {
                             critical_payload_deadline.get_or_insert(payload_deadline);
                         }
                         RoundClass::Intermediate => {
-                            if self.uses_dedicated_intermediate_queue() {
+                            if self.uses_intermediate_payload_queue() {
                                 self.intermediate_payload_size += digest.size();
                                 self.intermediate_digests.push_back((digest, worker_id));
                                 intermediate_payload_deadline.get_or_insert(payload_deadline);

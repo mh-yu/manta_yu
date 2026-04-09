@@ -190,10 +190,10 @@ Examples:
                        help='Minimum number of leader-round vertices that must each gather f+1 support before the regular solid path starts leader selection')
     parser.add_argument('--adaptive-intermediate-spill', dest='enable_adaptive_intermediate_spill',
                        action='store_true',
-                       help='Enable critical-first routing in 2-worker mode and spill to the intermediate queue only after the critical backlog grows')
+                       help='Enable critical-first routing and spill a small amount of payload to the intermediate queue only after the critical backlog grows')
     parser.add_argument('--no-adaptive-intermediate-spill', dest='enable_adaptive_intermediate_spill',
                        action='store_false',
-                       help='Disable adaptive spillover and use the static 2-worker queue split')
+                       help='Disable adaptive spillover and keep the default queue behavior for the current worker setting')
     parser.set_defaults(enable_adaptive_intermediate_spill=False)
     parser.add_argument('--design-tag', default='manta',
                        help='Design tag written to summary and run directory name (default: manta)')

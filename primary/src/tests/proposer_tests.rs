@@ -235,7 +235,7 @@ async fn single_worker_never_uses_intermediate_payload_queue() {
 }
 
 #[tokio::test]
-async fn adaptive_spill_prefers_critical_until_threshold() {
+async fn adaptive_spill_prefers_critical_until_small_intermediate_window_fills() {
     let committee = committee();
     let (name, secret) = keys().pop().unwrap();
     let signature_service = SignatureService::new(secret);
@@ -252,7 +252,7 @@ async fn adaptive_spill_prefers_critical_until_threshold() {
         rx_core: rx_parents,
         rx_workers: rx_our_digests,
         tx_core: tx_headers,
-        local_workers: 2,
+        local_workers: 1,
         enable_adaptive_intermediate_spill: true,
         unlocked_rounds: HashMap::new(),
         proposed_rounds: HashSet::new(),
@@ -269,7 +269,8 @@ async fn adaptive_spill_prefers_critical_until_threshold() {
     assert_eq!(proposer.payload_queue_for_worker(0), RoundClass::Critical);
     proposer.critical_payload_size = 64;
     assert_eq!(proposer.payload_queue_for_worker(0), RoundClass::Intermediate);
-    assert_eq!(proposer.payload_queue_for_worker(1), RoundClass::Intermediate);
+    proposer.intermediate_payload_size = 32;
+    assert_eq!(proposer.payload_queue_for_worker(0), RoundClass::Critical);
 }
 
 #[tokio::test]

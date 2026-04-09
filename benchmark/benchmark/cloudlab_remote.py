@@ -1615,6 +1615,7 @@ SCRIPTEOF'''
                                             'enable_commit_recheck',
                                             'fast_coin_candidate_threshold',
                                             'solid_candidate_threshold',
+                                            'enable_adaptive_intermediate_spill',
                                             'design_tag',
                                         )
                                     },
