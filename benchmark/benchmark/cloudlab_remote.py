@@ -1617,6 +1617,7 @@ SCRIPTEOF'''
                                             'coverage',
                                             'allow_cross_step_weak_edges',
                                             'enable_fast_coin',
+                                            'solid_commit_trigger_on_solid_step',
                                             'enable_commit_recheck',
                                             'fast_coin_candidate_threshold',
                                             'solid_candidate_threshold',

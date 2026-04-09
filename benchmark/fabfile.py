@@ -256,14 +256,14 @@ def cloudlab_remote(
     coverage=7,
     allow_cross_step_weak_edges=True,
     enable_fast_coin=True,
-    solid_commit_trigger_on_solid_step=False, # r3 commit
-    enable_commit_recheck=False, # r2 commit
+    solid_commit_trigger_on_solid_step=True, # r3 commit
+    enable_commit_recheck=True, # r2 commit
     fast_coin_candidate_threshold=4,
     solid_candidate_threshold=4,
     enable_adaptive_intermediate_spill=True, # payload shceduling
     adaptive_intermediate_spill_trigger_digests=2,
     adaptive_intermediate_spill_cap_digests=1,
-    design_tag='manta_final_80ms',
+    design_tag='manta_final_ablation',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
@@ -278,12 +278,12 @@ def cloudlab_remote(
         'collocate': True,
         'rate_type': 'balanced',
         # 'rate': [20000,40000,60000,80000,100000,120000,140000],
-        'rate': [120000],
+        'rate': [100000],
         # 'rate': [40000,80000,100000,120000,140000,150000,160000,180000],
         # 'rate': [130000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 2,       
+        'runs': 1,       
     }
     node_params = {
         'header_size': 1_000,  # bytes
@@ -291,7 +291,7 @@ def cloudlab_remote(
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
-        'batch_size': 256_000,  # bytes
+        'batch_size': 500_000,  # bytes
         'max_batch_delay': 50,  # ms
         'sigma': sigma,
         'kappa': kappa,
