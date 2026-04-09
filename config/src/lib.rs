@@ -30,6 +30,10 @@ fn default_solid_candidate_threshold() -> usize {
     0
 }
 
+fn default_enable_adaptive_intermediate_spill() -> bool {
+    false
+}
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("Node {0} is not in the committee")]
@@ -99,6 +103,10 @@ pub struct Parameters {
     /// The delay after which the workers seal a batch of transactions, even if `max_batch_size`
     /// is not reached. Denominated in ms.
     pub max_batch_delay: u64,
+    /// Whether a multi-worker primary should first fill the critical payload queue and only route
+    /// new digests to the intermediate queue once the critical backlog is large enough.
+    #[serde(default = "default_enable_adaptive_intermediate_spill")]
+    pub enable_adaptive_intermediate_spill: bool,
 }
 
 impl Default for Parameters {
@@ -111,6 +119,7 @@ impl Default for Parameters {
             sync_retry_nodes: 3,
             batch_size: 500_000,
             max_batch_delay: 100,
+            enable_adaptive_intermediate_spill: false,
         }
     }
 }
@@ -126,6 +135,10 @@ impl Parameters {
         info!("Sync retry nodes set to {} nodes", self.sync_retry_nodes);
         info!("Batch size set to {} B", self.batch_size);
         info!("Max batch delay set to {} ms", self.max_batch_delay);
+        info!(
+            "Adaptive intermediate spill set to {}",
+            self.enable_adaptive_intermediate_spill
+        );
     }
 }
 

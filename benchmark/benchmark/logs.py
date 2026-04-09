@@ -276,6 +276,7 @@ class LogParser:
             ('Enable commit recheck', 'enable_commit_recheck'),
             ('Fast coin candidate threshold', 'fast_coin_candidate_threshold'),
             ('Solid candidate threshold', 'solid_candidate_threshold'),
+            ('Enable adaptive intermediate spill', 'enable_adaptive_intermediate_spill'),
             ('Design tag', 'design_tag'),
         ):
             value = node_params.get(key)

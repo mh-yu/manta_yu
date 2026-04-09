@@ -258,16 +258,18 @@ def cloudlab_remote(
     enable_commit_recheck=True,
     fast_coin_candidate_threshold=4,
     solid_candidate_threshold=4,
+    enable_adaptive_intermediate_spill=True,
     design_tag='manta_final_80ms',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
     enable_fast_coin = _coerce_bool(enable_fast_coin)
     enable_commit_recheck = _coerce_bool(enable_commit_recheck)
+    enable_adaptive_intermediate_spill = _coerce_bool(enable_adaptive_intermediate_spill)
     bench_params = {
         'faults': 0,
         'nodes': [10],
-        'workers': 1,
+        'workers': 2,
         'collocate': True,
         'rate_type': 'balanced',
         # 'rate': [20000,40000,60000,80000,100000,120000,140000,160000,180000,200000],
@@ -295,6 +297,7 @@ def cloudlab_remote(
         'enable_commit_recheck': enable_commit_recheck,
         'fast_coin_candidate_threshold': int(fast_coin_candidate_threshold),
         'solid_candidate_threshold': int(solid_candidate_threshold),
+        'enable_adaptive_intermediate_spill': enable_adaptive_intermediate_spill,
         'design_tag': design_tag,
         # 's': 0.99,
     }

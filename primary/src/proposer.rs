@@ -36,6 +36,9 @@ pub struct Proposer {
     tx_core: Sender<Header>,
     /// Number of local workers attached to this primary.
     local_workers: usize,
+    /// Whether to only spill into the intermediate queue after the critical queue
+    /// already accumulated a meaningful backlog.
+    enable_adaptive_intermediate_spill: bool,
 
     /// Unlocked proposal rounds waiting to be materialized into headers.
     unlocked_rounds: HashMap<Round, UnlockedRound>,
@@ -90,6 +93,7 @@ impl Proposer {
         signature_service: SignatureService,
         header_size: usize,
         max_header_delay: u64,
+        enable_adaptive_intermediate_spill: bool,
         rx_core: Receiver<(ProposalParents, Round)>,
         rx_workers: Receiver<(Digest, WorkerId)>,
         tx_core: Sender<Header>,
@@ -138,6 +142,7 @@ impl Proposer {
                 rx_workers,
                 tx_core,
                 local_workers,
+                enable_adaptive_intermediate_spill,
                 unlocked_rounds,
                 proposed_rounds: HashSet::new(),
                 next_unlock_order: 1,
@@ -204,6 +209,10 @@ impl Proposer {
 
     fn uses_dedicated_intermediate_queue(&self) -> bool {
         self.local_workers > 1
+    }
+
+    fn adaptive_spill_threshold_reached(&self) -> bool {
+        self.critical_payload_size >= 2 * self.header_size
     }
 
     fn next_recheck_deadline(
@@ -426,6 +435,12 @@ impl Proposer {
     fn payload_queue_for_worker(&self, worker_id: WorkerId) -> RoundClass {
         if !self.uses_dedicated_intermediate_queue() {
             RoundClass::Critical
+        } else if self.enable_adaptive_intermediate_spill {
+            if self.adaptive_spill_threshold_reached() {
+                RoundClass::Intermediate
+            } else {
+                RoundClass::Critical
+            }
         } else if worker_id % 2 == 0 {
             RoundClass::Intermediate
         } else {

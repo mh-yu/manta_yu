@@ -23,6 +23,7 @@ async fn propose_empty() {
         signature_service,
         /* header_size */ 1_000,
         /* max_header_delay */ 20,
+        /* enable_adaptive_intermediate_spill */ false,
         /* rx_core */ rx_parents,
         /* rx_workers */ rx_our_digests,
         /* tx_core */ tx_headers,
@@ -87,6 +88,7 @@ async fn propose_payload() {
         rx_workers: rx_our_digests,
         tx_core: tx_headers,
         local_workers: 1,
+        enable_adaptive_intermediate_spill: false,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 2,
@@ -147,6 +149,7 @@ async fn intermediate_round_still_proposes_empty_with_single_worker() {
         rx_workers: rx_our_digests,
         tx_core: tx_headers,
         local_workers: 1,
+        enable_adaptive_intermediate_spill: false,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 1,
@@ -207,6 +210,7 @@ async fn single_worker_never_uses_intermediate_payload_queue() {
         rx_workers: rx_our_digests,
         tx_core: tx_headers,
         local_workers: 1,
+        enable_adaptive_intermediate_spill: false,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 1,
@@ -228,6 +232,44 @@ async fn single_worker_never_uses_intermediate_payload_queue() {
         .unwrap();
     assert_eq!(decision.round, 2);
     assert!(!decision.include_payload);
+}
+
+#[tokio::test]
+async fn adaptive_spill_prefers_critical_until_threshold() {
+    let committee = committee();
+    let (name, secret) = keys().pop().unwrap();
+    let signature_service = SignatureService::new(secret);
+    let (_tx_parents, rx_parents) = channel::<(ProposalParents, Round)>(1);
+    let (_tx_our_digests, rx_our_digests) = channel::<(Digest, WorkerId)>(1);
+    let (tx_headers, _rx_headers) = channel::<Header>(1);
+
+    let mut proposer = Proposer {
+        name,
+        node_id: None,
+        signature_service,
+        header_size: 32,
+        max_header_delay: 1_000,
+        rx_core: rx_parents,
+        rx_workers: rx_our_digests,
+        tx_core: tx_headers,
+        local_workers: 2,
+        enable_adaptive_intermediate_spill: true,
+        unlocked_rounds: HashMap::new(),
+        proposed_rounds: HashSet::new(),
+        next_unlock_order: 0,
+        intermediate_digests: VecDeque::new(),
+        intermediate_payload_size: 0,
+        critical_digests: VecDeque::new(),
+        critical_payload_size: 31,
+        solid_step_length: committee.solid_step_length(),
+        solid_wave_length: committee.solid_wave_length(),
+        parent_grace_delay: Duration::from_millis(0),
+    };
+
+    assert_eq!(proposer.payload_queue_for_worker(0), RoundClass::Critical);
+    proposer.critical_payload_size = 64;
+    assert_eq!(proposer.payload_queue_for_worker(0), RoundClass::Intermediate);
+    assert_eq!(proposer.payload_queue_for_worker(1), RoundClass::Intermediate);
 }
 
 #[tokio::test]
@@ -271,6 +313,7 @@ async fn intermediate_round_uses_payload_from_dedicated_queue() {
         rx_workers: rx_our_digests,
         tx_core: tx_headers,
         local_workers: 2,
+        enable_adaptive_intermediate_spill: false,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 1,
@@ -328,6 +371,7 @@ async fn critical_unlock_keeps_existing_intermediate_round() {
         rx_workers: rx_our_digests,
         tx_core: tx_headers,
         local_workers: 2,
+        enable_adaptive_intermediate_spill: false,
         unlocked_rounds,
         proposed_rounds: HashSet::new(),
         next_unlock_order: 1,
@@ -370,6 +414,7 @@ async fn intermediate_round_is_kept_after_critical_started() {
         rx_workers: rx_our_digests,
         tx_core: tx_headers,
         local_workers: 2,
+        enable_adaptive_intermediate_spill: false,
         unlocked_rounds: HashMap::new(),
         proposed_rounds: [3u64].iter().copied().collect(),
         next_unlock_order: 0,

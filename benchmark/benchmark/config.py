@@ -207,6 +207,11 @@ class NodeParameters:
         if not all(isinstance(x, int) for x in inputs):
             raise ConfigError('Invalid parameters type')
 
+        optional_bool_fields = ['enable_adaptive_intermediate_spill']
+        for field in optional_bool_fields:
+            if field in json and not isinstance(json[field], bool):
+                raise ConfigError(f'Invalid parameters type for {field}')
+
         self.json = json
 
     def print(self, filename):

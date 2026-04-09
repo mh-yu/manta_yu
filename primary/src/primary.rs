@@ -192,6 +192,7 @@ impl Primary {
             signature_service,
             parameters.header_size,
             parameters.max_header_delay,
+            parameters.enable_adaptive_intermediate_spill,
             /* rx_core */ rx_parents,
             /* rx_workers */ rx_our_digests,
             /* tx_core */ tx_headers,
