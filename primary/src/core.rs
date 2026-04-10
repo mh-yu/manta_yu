@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use store::Store;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::time::{sleep_until, Duration, Instant};
+use tokio::time::{Duration, Instant};
 
 #[cfg(test)]
 #[path = "tests/core_tests.rs"]
@@ -41,7 +41,6 @@ struct VertexRoundState {
 struct AdaptiveWaitState {
     proposal_parents: ProposalParents,
     waiting_vertices: HashMap<PublicKey, Digest>,
-    deadline: Instant,
     started_at: Instant,
     initial_parent_count: usize,
     extensions: usize,
@@ -266,9 +265,6 @@ impl Core {
                 if delivered.contains(&digest) {
                     continue;
                 }
-                if vertex_state.certified_digest.as_ref() == Some(&digest) {
-                    continue;
-                }
                 state.waiting_vertices.insert(*origin, digest);
             }
         }
@@ -280,8 +276,8 @@ impl Core {
         let mut changed = false;
         if let Some(mut state) = self.adaptive_wait_rounds.remove(&round) {
             changed = self.rebuild_waiting_vertices(round, &mut state);
-            if changed {
-                state.deadline = Instant::now() + self.adaptive_wait_delay;
+            if changed && !state.waiting_vertices.is_empty() {
+                state.extensions += 1;
             }
             self.adaptive_wait_rounds.insert(round, state);
         }
@@ -346,7 +342,6 @@ impl Core {
             .unwrap_or(AdaptiveWaitState {
                 proposal_parents: ProposalParents::default(),
                 waiting_vertices: HashMap::new(),
-                deadline: now + self.adaptive_wait_delay,
                 started_at: now,
                 initial_parent_count: 0,
                 extensions: 0,
@@ -374,10 +369,8 @@ impl Core {
         if !had_existing_state {
             state.started_at = now;
             state.initial_parent_count = state.proposal_parents.parents.len();
-            state.deadline = now + self.adaptive_wait_delay;
             self.log_adaptive_wait_start(round, &state);
         } else if observed_progress {
-            state.deadline = now + self.adaptive_wait_delay;
             state.extensions += 1;
             self.log_adaptive_wait_extend(
                 round,
@@ -388,13 +381,6 @@ impl Core {
         }
         self.adaptive_wait_rounds.insert(round, state);
         Ok(())
-    }
-
-    fn next_adaptive_wait_deadline(&self) -> Option<Instant> {
-        self.adaptive_wait_rounds
-            .values()
-            .map(|state| state.deadline)
-            .min()
     }
 
     #[cfg(feature = "benchmark")]
@@ -465,17 +451,16 @@ impl Core {
     ) {
     }
 
-    async fn flush_ready_adaptive_wait_rounds(&mut self) {
-        let now = Instant::now();
+    async fn flush_resolved_adaptive_wait_rounds(&mut self) {
         let ready_rounds: Vec<_> = self
             .adaptive_wait_rounds
             .iter()
-            .filter_map(|(round, state)| (state.deadline <= now).then_some(*round))
+            .filter_map(|(round, state)| state.waiting_vertices.is_empty().then_some(*round))
             .collect();
 
         for round in ready_rounds {
             if let Some(state) = self.adaptive_wait_rounds.remove(&round) {
-                self.log_adaptive_wait_release(round, &state, "timeout");
+                self.log_adaptive_wait_release(round, &state, "resolved");
                 self.adaptive_wait_released.insert(round);
                 self.tx_proposer
                     .send((state.proposal_parents, round))
@@ -975,15 +960,7 @@ impl Core {
 
     // Main loop listening to incoming messages.
     pub async fn run(&mut self) {
-        let fallback_deadline = Instant::now() + Duration::from_secs(24 * 60 * 60);
-        let timer = sleep_until(fallback_deadline);
-        tokio::pin!(timer);
-
         loop {
-            let next_deadline = self
-                .next_adaptive_wait_deadline()
-                .unwrap_or_else(|| Instant::now() + Duration::from_secs(24 * 60 * 60));
-            timer.as_mut().reset(next_deadline);
             let result = tokio::select! {
                 // We receive here messages from other primaries.
                 Some(message) = self.rx_primaries.recv() => {
@@ -1087,11 +1064,6 @@ impl Core {
 
                 // We also receive here our new headers created by the `Proposer`.
                 Some(header) = self.rx_proposer.recv() => self.process_own_header(header).await,
-
-                () = &mut timer => {
-                    self.flush_ready_adaptive_wait_rounds().await;
-                    Ok(())
-                }
             };
             match result {
                 Ok(()) => (),
@@ -1102,7 +1074,7 @@ impl Core {
                 Err(e @ DagError::TooOld(..)) => debug!("{}", e),
                 Err(e) => warn!("{}", e),
             }
-            self.flush_ready_adaptive_wait_rounds().await;
+            self.flush_resolved_adaptive_wait_rounds().await;
 
             // Cleanup internal state.
             let round = self.consensus_round.load(Ordering::Relaxed);
