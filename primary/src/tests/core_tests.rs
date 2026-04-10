@@ -59,6 +59,7 @@ async fn process_header() {
         signature_service,
         /* consensus_round */ Arc::new(AtomicU64::new(0)),
         /* gc_depth */ 50,
+        /* adaptive_wait_enabled */ true,
         /* rx_primaries */ rx_primary_messages,
         /* rx_header_waiter */ rx_headers_loopback,
         /* rx_certificate_waiter */ rx_certificates_loopback,
@@ -126,6 +127,7 @@ async fn process_header_missing_parent() {
         signature_service,
         /* consensus_round */ Arc::new(AtomicU64::new(0)),
         /* gc_depth */ 50,
+        /* adaptive_wait_enabled */ true,
         /* rx_primaries */ rx_primary_messages,
         /* rx_header_waiter */ rx_headers_loopback,
         /* rx_certificate_waiter */ rx_certificates_loopback,
@@ -186,6 +188,7 @@ async fn process_header_missing_payload() {
         signature_service,
         /* consensus_round */ Arc::new(AtomicU64::new(0)),
         /* gc_depth */ 50,
+        /* adaptive_wait_enabled */ true,
         /* rx_primaries */ rx_primary_messages,
         /* rx_header_waiter */ rx_headers_loopback,
         /* rx_certificate_waiter */ rx_certificates_loopback,
@@ -248,6 +251,7 @@ async fn process_votes() {
         signature_service,
         /* consensus_round */ Arc::new(AtomicU64::new(0)),
         /* gc_depth */ 50,
+        /* adaptive_wait_enabled */ true,
         /* rx_primaries */ rx_primary_messages,
         /* rx_header_waiter */ rx_headers_loopback,
         /* rx_certificate_waiter */ rx_certificates_loopback,
@@ -320,6 +324,7 @@ async fn process_certificates() {
         signature_service,
         /* consensus_round */ Arc::new(AtomicU64::new(0)),
         /* gc_depth */ 50,
+        /* adaptive_wait_enabled */ true,
         /* rx_primaries */ rx_primary_messages,
         /* rx_header_waiter */ rx_headers_loopback,
         /* rx_certificate_waiter */ rx_certificates_loopback,
@@ -395,6 +400,7 @@ async fn adaptive_wait_absorbs_late_certificate() {
         signature_service,
         Arc::new(AtomicU64::new(0)),
         50,
+        true,
         rx_primary_messages,
         rx_headers_loopback,
         rx_certificates_loopback,
@@ -408,6 +414,17 @@ async fn adaptive_wait_absorbs_late_certificate() {
         .take(4)
         .map(|header| certificate(header))
         .collect();
+
+    tx_primary_messages
+        .send(PrimaryMessage::Header(certificates[3].header.clone()))
+        .await
+        .unwrap();
+    for vote in votes(&certificates[3].header).into_iter().take(2) {
+        tx_primary_messages
+            .send(PrimaryMessage::Vote(vote))
+            .await
+            .unwrap();
+    }
 
     tx_primary_messages
         .send(PrimaryMessage::Certificate(certificates[0].clone()))
@@ -439,6 +456,83 @@ async fn adaptive_wait_absorbs_late_certificate() {
 
     let received_parents: HashSet<_> = received.0.parents.into_iter().collect();
     let expected_parents: HashSet<_> = certificates.iter().map(|x| x.digest()).collect();
+    assert_eq!(received.1, 1);
+    assert_eq!(received_parents, expected_parents);
+}
+
+#[tokio::test]
+async fn adaptive_wait_can_be_disabled() {
+    let (name, secret) = keys().pop().unwrap();
+    let signature_service = SignatureService::new(secret);
+
+    let (tx_sync_headers, _rx_sync_headers) = channel(1);
+    let (tx_sync_certificates, _rx_sync_certificates) = channel(1);
+    let (tx_primary_messages, rx_primary_messages) = channel(4);
+    let (_tx_headers_loopback, rx_headers_loopback) = channel(1);
+    let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
+    let (_tx_headers, rx_headers) = channel(1);
+    let (tx_consensus, _rx_consensus) = channel(4);
+    let (tx_parents, mut rx_parents) = channel(2);
+
+    let path = ".db_test_adaptive_wait_can_be_disabled";
+    let _ = fs::remove_dir_all(path);
+    let store = Store::new(path).unwrap();
+
+    let synchronizer = Synchronizer::new(
+        name,
+        &committee(),
+        store.clone(),
+        tx_sync_headers,
+        tx_sync_certificates,
+    );
+
+    Core::spawn(
+        name,
+        committee(),
+        store,
+        synchronizer,
+        signature_service,
+        Arc::new(AtomicU64::new(0)),
+        50,
+        false,
+        rx_primary_messages,
+        rx_headers_loopback,
+        rx_certificates_loopback,
+        rx_headers,
+        tx_consensus,
+        tx_parents,
+    );
+
+    let certificates: Vec<_> = headers()
+        .iter()
+        .take(4)
+        .map(|header| certificate(header))
+        .collect();
+
+    tx_primary_messages
+        .send(PrimaryMessage::Certificate(certificates[0].clone()))
+        .await
+        .unwrap();
+    tx_primary_messages
+        .send(PrimaryMessage::Certificate(certificates[1].clone()))
+        .await
+        .unwrap();
+    tx_primary_messages
+        .send(PrimaryMessage::Certificate(certificates[2].clone()))
+        .await
+        .unwrap();
+
+    let received = tokio::time::timeout(
+        tokio::time::Duration::from_millis(200),
+        rx_parents.recv(),
+    )
+    .await
+    .expect("disabled adaptive wait did not release immediately")
+    .unwrap();
+
+    let received_parents: HashSet<_> = received.0.parents.into_iter().collect();
+    let expected_parents: HashSet<_> =
+        certificates[..3].iter().map(|x| x.digest()).collect();
     assert_eq!(received.1, 1);
     assert_eq!(received_parents, expected_parents);
 }
@@ -481,6 +575,7 @@ async fn process_votes_for_known_remote_header() {
         signature_service,
         Arc::new(AtomicU64::new(0)),
         50,
+        true,
         rx_primary_messages,
         rx_headers_loopback,
         rx_certificates_loopback,

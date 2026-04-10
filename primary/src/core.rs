@@ -74,6 +74,8 @@ pub struct Core {
     consensus_round: Arc<AtomicU64>,
     /// The depth of the garbage collector.
     gc_depth: Round,
+    /// Whether adaptive wait is enabled for this primary.
+    adaptive_wait_enabled: bool,
 
     /// Receiver for dag messages (headers, votes, certificates).
     rx_primaries: Receiver<PrimaryMessage>,
@@ -278,12 +280,23 @@ impl Core {
             return true;
         }
 
-        state.certified_digest = Some(certificate.header.id.clone());
-
         if let Some(known) = &state.known_digest {
             if known != &certificate.header.id {
                 state.equivocating = true;
                 return true;
+            }
+        }
+
+        state.certified_digest = Some(certificate.header.id.clone());
+        state.known_digest = Some(certificate.header.id.clone());
+
+        let support = state
+            .prepare_support
+            .entry(certificate.header.id.clone())
+            .or_insert_with(PrepareSupport::default);
+        for (author, _) in &certificate.votes {
+            if support.voters.insert(*author) {
+                support.weight += self.committee.stake(author) as u64;
             }
         }
 
@@ -356,6 +369,9 @@ impl Core {
     }
 
     async fn track_adaptive_wait_progress(&mut self, round: Round) -> bool {
+        if !self.adaptive_wait_enabled {
+            return false;
+        }
         let mut changed = false;
         if let Some(mut state) = self.adaptive_wait_rounds.remove(&round) {
             (changed, _) = self.rebuild_waiting_vertices(round, &mut state).await;
@@ -409,6 +425,14 @@ impl Core {
         round: Round,
         parents: ProposalParents,
     ) -> DagResult<()> {
+        if !self.adaptive_wait_enabled {
+            self.tx_proposer
+                .send((parents, round))
+                .await
+                .expect("Failed to send certificate");
+            return Ok(());
+        }
+
         if self.adaptive_wait_released.contains(&round) {
             self.tx_proposer
                 .send((parents, round))
@@ -592,6 +616,9 @@ impl Core {
     }
 
     async fn flush_resolved_adaptive_wait_rounds(&mut self) {
+        if !self.adaptive_wait_enabled {
+            return;
+        }
         let ready_rounds: Vec<_> = self
             .adaptive_wait_rounds
             .iter()
@@ -619,6 +646,7 @@ impl Core {
         signature_service: SignatureService,
         consensus_round: Arc<AtomicU64>,
         gc_depth: Round,
+        adaptive_wait_enabled: bool,
         rx_primaries: Receiver<PrimaryMessage>,
         rx_header_waiter: Receiver<Header>,
         rx_certificate_waiter: Receiver<Certificate>,
@@ -635,6 +663,7 @@ impl Core {
                 signature_service,
                 consensus_round,
                 gc_depth,
+                adaptive_wait_enabled,
                 rx_primaries,
                 rx_header_waiter,
                 rx_certificate_waiter,

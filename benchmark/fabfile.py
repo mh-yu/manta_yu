@@ -29,8 +29,14 @@ except ImportError:
     PlotError = None
 
 
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {'0', 'false', 'no', 'off'}
+
+
 @task
-def local(ctx, debug=False):
+def local(ctx, debug=False, enable_wait=True):
     ''' Run benchmarks on localhost '''
     bench_params = {
         'faults': 0,
@@ -53,7 +59,8 @@ def local(ctx, debug=False):
         'kappa': 2,
         'reference': 4,
         'coverage': 7,
-        's': 0.99
+        's': 0.99,
+        'enable_wait': _as_bool(enable_wait),
     }
     try:
         ret = LocalBench(bench_params, node_params).run(debug)
@@ -254,7 +261,7 @@ def cloudlab_wan(ctx, action='setup', settings_file='cloudlab_settings.json'):
 
 
 @task
-def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2):
+def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2, enable_wait=False):
     ''' Run benchmarks on CloudLab '''
     bench_params = {
         'faults': 0,
@@ -267,7 +274,7 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2):
         'tx_size': 512,
         'duration': 120,
         'runs': 2,
-        'network_tag': 'no-delay-wait',
+        'network_tag': 'geo424-wait',
     }
     node_params = {
         'header_size': 1_000,  # bytes
@@ -282,6 +289,7 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2):
         'reference': 7,
         'coverage': 7,
         's': 0.99,
+        'enable_wait': _as_bool(enable_wait),
     }
     try:
         CloudLabBench(ctx).run(bench_params, node_params, debug=debug)

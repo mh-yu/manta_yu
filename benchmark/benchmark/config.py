@@ -184,6 +184,9 @@ class NodeParameters:
         if not all(isinstance(x, int) for x in inputs):
             raise ConfigError('Invalid parameters type')
 
+        if 'enable_wait' in json and not isinstance(json['enable_wait'], bool):
+            raise ConfigError('Invalid parameters type')
+
         self.json = json
 
     def print(self, filename):

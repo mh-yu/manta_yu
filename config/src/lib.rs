@@ -79,6 +79,9 @@ pub struct Parameters {
     /// The delay after which the workers seal a batch of transactions, even if `max_batch_size`
     /// is not reached. Denominated in ms.
     pub max_batch_delay: u64,
+    /// Whether primaries should enable adaptive wait before unlocking the next round.
+    #[serde(default = "Parameters::default_adaptive_wait_enabled")]
+    pub enable_wait: bool,
 }
 
 impl Default for Parameters {
@@ -91,6 +94,7 @@ impl Default for Parameters {
             sync_retry_nodes: 3,
             batch_size: 500_000,
             max_batch_delay: 100,
+            enable_wait: Self::default_adaptive_wait_enabled(),
         }
     }
 }
@@ -98,6 +102,10 @@ impl Default for Parameters {
 impl Import for Parameters {}
 
 impl Parameters {
+    fn default_adaptive_wait_enabled() -> bool {
+        true
+    }
+
     pub fn log(&self) {
         info!("Header size set to {} B", self.header_size);
         info!("Max header delay set to {} ms", self.max_header_delay);
@@ -106,6 +114,10 @@ impl Parameters {
         info!("Sync retry nodes set to {} nodes", self.sync_retry_nodes);
         info!("Batch size set to {} B", self.batch_size);
         info!("Max batch delay set to {} ms", self.max_batch_delay);
+        info!(
+            "Adaptive wait {}",
+            if self.enable_wait { "enabled" } else { "disabled" }
+        );
     }
 }
 
