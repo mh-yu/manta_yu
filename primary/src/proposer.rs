@@ -1,7 +1,7 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
-use crate::messages::{Certificate, Header, ProposalParents};
+use crate::messages::{BatchPayload, Certificate, Header, ProposalParents};
 use crate::primary::Round;
-use config::{Committee, WorkerId};
+use config::Committee;
 use crypto::Hash as _;
 use crypto::{Digest, PublicKey, SignatureService};
 use log::debug;
@@ -30,8 +30,8 @@ pub struct Proposer {
 
     /// Receives the parents to include in the next header (along with their round number).
     rx_core: Receiver<(ProposalParents, Round)>,
-    /// Receives the batches' digests from our workers.
-    rx_workers: Receiver<(Digest, WorkerId)>,
+    /// Receives sealed batches from our workers.
+    rx_workers: Receiver<BatchPayload>,
     /// Sends newly created headers to the `Core`.
     tx_core: Sender<Header>,
 
@@ -41,9 +41,9 @@ pub struct Proposer {
     proposed_rounds: HashSet<Round>,
     /// Monotonic unlock order used to preserve "first unlocked, first proposed".
     next_unlock_order: u64,
-    /// Holds the batches' digests waiting to be included in the next header.
-    digests: VecDeque<(Digest, WorkerId)>,
-    /// Keeps track of the size (in bytes) of batches' digests that we received so far.
+    /// Holds the sealed batches waiting to be included in the next header.
+    digests: VecDeque<BatchPayload>,
+    /// Keeps track of the size (in bytes) of batches that we received so far.
     payload_size: usize,
     /// The solid step length.
     solid_step_length: u64,
@@ -83,7 +83,7 @@ impl Proposer {
         header_size: usize,
         max_header_delay: u64,
         rx_core: Receiver<(ProposalParents, Round)>,
-        rx_workers: Receiver<(Digest, WorkerId)>,
+        rx_workers: Receiver<BatchPayload>,
         tx_core: Sender<Header>,
         _store: store::Store,
     ) {
@@ -362,9 +362,12 @@ impl Proposer {
         })
     }
 
-    fn take_payload_for_header(&mut self) -> BTreeMap<Digest, WorkerId> {
+    fn take_payload_for_header(&mut self) -> BTreeMap<Digest, BatchPayload> {
         self.payload_size = 0;
-        self.digests.drain(..).collect()
+        self.digests
+            .drain(..)
+            .map(|payload| (payload.digest(), payload))
+            .collect()
     }
 
     async fn make_header(
@@ -444,6 +447,30 @@ impl Proposer {
         );
 
         #[cfg(feature = "benchmark")]
+        {
+            let vertex_bytes = bincode::serialize(&header)
+                .expect("Failed to serialize header for vertex size stats")
+                .len();
+            let payload_bytes: usize = header.payload.values().map(|payload| payload.size()).sum();
+            let payload_entries = header.payload.len();
+            let payload_txs: usize = header
+                .payload
+                .values()
+                .map(|payload| payload.transactions.len())
+                .sum();
+            info!(
+                "VERTEX_SIZE round={} node={} header={} vertex_bytes={} payload_bytes={} payload_entries={} payload_txs={}",
+                round,
+                self.node_id.unwrap_or(999),
+                header.id,
+                vertex_bytes,
+                payload_bytes,
+                payload_entries,
+                payload_txs
+            );
+        }
+
+        #[cfg(feature = "benchmark")]
         for digest in header.payload.keys() {
             // NOTE: This log entry is used to compute performance.
             info!("Created {} -> {:?}", header, digest);
@@ -502,9 +529,9 @@ impl Proposer {
                     let proposal_round = round + 1;
                     self.unlock_round(proposal_round, parent_update);
                 }
-                Some((digest, worker_id)) = self.rx_workers.recv() => {
-                    self.payload_size += digest.size();
-                    self.digests.push_back((digest, worker_id));
+                Some(payload) = self.rx_workers.recv() => {
+                    self.payload_size += payload.size();
+                    self.digests.push_back(payload);
                 }
                 () = &mut timer => {
                     // Nothing to do.

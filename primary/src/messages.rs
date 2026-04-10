@@ -10,11 +10,41 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::convert::TryInto;
 use std::fmt;
 
+pub type Transaction = Vec<u8>;
+pub type Batch = Vec<Transaction>;
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default, Eq, PartialEq)]
+pub struct BatchPayload {
+    pub worker_id: WorkerId,
+    pub transactions: Batch,
+}
+
+impl BatchPayload {
+    pub fn new(worker_id: WorkerId, transactions: Batch) -> Self {
+        Self {
+            worker_id,
+            transactions,
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        self.transactions.iter().map(|transaction| transaction.len()).sum()
+    }
+}
+
+impl Hash for BatchPayload {
+    fn digest(&self) -> Digest {
+        let serialized = bincode::serialize(&self.transactions)
+            .expect("Failed to serialize batch payload transactions for digest");
+        Digest(Sha512::digest(&serialized).as_slice()[..32].try_into().unwrap())
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Default)]
 pub struct Header {
     pub author: PublicKey,
     pub round: Round,
-    pub payload: BTreeMap<Digest, WorkerId>,
+    pub payload: BTreeMap<Digest, BatchPayload>,
     pub parents: BTreeSet<Digest>,
     pub id: Digest,
     pub signature: Signature,
@@ -34,7 +64,7 @@ impl Header {
     pub async fn new(
         author: PublicKey,
         round: Round,
-        payload: BTreeMap<Digest, WorkerId>,
+        payload: BTreeMap<Digest, BatchPayload>,
         parents: BTreeSet<Digest>,
         signature_service: &mut SignatureService,
     ) -> Self {
@@ -67,11 +97,15 @@ impl Header {
         let voting_rights = committee.stake(&self.author);
         ensure!(voting_rights > 0, DagError::UnknownAuthority(self.author));
 
-        // Ensure all worker ids are correct.
-        for worker_id in self.payload.values() {
+        // Ensure all embedded batches are well formed and mapped to a valid worker.
+        for (digest, payload) in &self.payload {
             committee
-                .worker(&self.author, &worker_id)
+                .worker(&self.author, &payload.worker_id)
                 .map_err(|_| DagError::MalformedHeader(self.id.clone()))?;
+            ensure!(
+                payload.digest() == *digest,
+                DagError::MalformedHeader(self.id.clone())
+            );
         }
 
         // Check the signature.
@@ -119,9 +153,9 @@ impl Hash for Header {
         let mut hasher = Sha512::new();
         hasher.update(&self.author);
         hasher.update(self.round.to_le_bytes());
-        for (x, y) in &self.payload {
+        for (x, payload) in &self.payload {
             hasher.update(x);
-            hasher.update(y.to_le_bytes());
+            hasher.update(payload.worker_id.to_le_bytes());
         }
         for x in &self.parents {
             hasher.update(x);
@@ -138,7 +172,7 @@ impl fmt::Debug for Header {
             self.id,
             self.round,
             self.author,
-            self.payload.keys().map(|x| x.size()).sum::<usize>(),
+            self.payload.values().map(|payload| payload.size()).sum::<usize>(),
         )
     }
 }

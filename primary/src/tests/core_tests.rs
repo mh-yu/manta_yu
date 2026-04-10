@@ -3,6 +3,7 @@ use super::*;
 use crate::common::{
     certificate, committee, committee_with_base_port, header, headers, keys, listener, votes,
 };
+use crate::messages::BatchPayload;
 use crypto::Signature;
 use futures::future::try_join_all;
 use std::fs;
@@ -198,8 +199,9 @@ async fn process_header_missing_payload() {
     );
 
     // Send a header to the core.
+    let payload = BatchPayload::new(0, vec![vec![1, 2, 3]]);
     let header = Header {
-        payload: [(Digest::default(), 0)].iter().cloned().collect(),
+        payload: [(Digest::default(), payload)].iter().cloned().collect(),
         ..header()
     };
     let id = header.id.clone();

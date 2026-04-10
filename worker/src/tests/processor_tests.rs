@@ -2,6 +2,7 @@
 use super::*;
 use crate::common::batch;
 use crate::worker::WorkerMessage;
+use primary::BatchPayload;
 use std::fs;
 use tokio::sync::mpsc::channel;
 
@@ -37,7 +38,11 @@ async fn hash_and_store() {
             .try_into()
             .unwrap(),
     );
-    let expected = bincode::serialize(&WorkerPrimaryMessage::OurBatch(digest.clone(), id)).unwrap();
+    let expected = bincode::serialize(&WorkerPrimaryMessage::OurBatch(BatchPayload::new(
+        id,
+        batch(),
+    )))
+    .unwrap();
     assert_eq!(output, expected);
 
     // Ensure the `Processor` correctly stored the batch.

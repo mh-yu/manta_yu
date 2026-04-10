@@ -4,6 +4,7 @@ use config::WorkerId;
 use crypto::Digest;
 use ed25519_dalek::Digest as _;
 use ed25519_dalek::Sha512;
+use primary::BatchPayload;
 use primary::WorkerPrimaryMessage;
 use std::convert::TryInto;
 use store::Store;
@@ -37,20 +38,25 @@ impl Processor {
                 // Hash the batch.
                 let digest = Digest(Sha512::digest(&batch).as_slice()[..32].try_into().unwrap());
 
+                // Deliver the batch's digest.
+                let transactions = match bincode::deserialize(&batch) {
+                    Ok(crate::worker::WorkerMessage::Batch(transactions)) => transactions,
+                    Ok(_) => panic!("Unexpected non-batch worker message in processor"),
+                    Err(e) => panic!("Failed to deserialize worker batch in processor: {}", e),
+                };
+
                 // Store the batch.
                 store.write(digest.to_vec(), batch).await;
 
-                // Deliver the batch's digest.
-                let message = match own_digest {
-                    true => WorkerPrimaryMessage::OurBatch(digest, id),
-                    false => WorkerPrimaryMessage::OthersBatch(digest, id),
-                };
-                let message = bincode::serialize(&message)
-                    .expect("Failed to serialize our own worker-primary message");
-                tx_digest
-                    .send(message)
-                    .await
-                    .expect("Failed to send digest");
+                if own_digest {
+                    let payload = BatchPayload::new(id, transactions);
+                    let message = bincode::serialize(&WorkerPrimaryMessage::OurBatch(payload))
+                        .expect("Failed to serialize our own worker-primary message");
+                    tx_digest
+                        .send(message)
+                        .await
+                        .expect("Failed to send digest");
+                }
             }
         });
     }

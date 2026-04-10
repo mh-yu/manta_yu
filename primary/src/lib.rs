@@ -8,7 +8,6 @@ mod garbage_collector;
 mod header_waiter;
 mod helper;
 mod messages;
-mod payload_receiver;
 mod primary;
 mod proposer;
 mod synchronizer;
@@ -17,5 +16,5 @@ mod synchronizer;
 #[path = "tests/common.rs"]
 mod common;
 
-pub use crate::messages::{Certificate, Header};
+pub use crate::messages::{BatchPayload, Certificate, Header};
 pub use crate::primary::{Primary, PrimaryWorkerMessage, Round, WorkerPrimaryMessage};

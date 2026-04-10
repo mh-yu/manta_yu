@@ -1,9 +1,9 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::error::{DagError, DagResult};
 use crate::messages::Header;
-use crate::primary::{PrimaryMessage, PrimaryWorkerMessage, Round};
+use crate::primary::{PrimaryMessage, Round};
 use bytes::Bytes;
-use config::{Committee, WorkerId};
+use config::Committee;
 use crypto::{Digest, PublicKey};
 use futures::future::try_join_all;
 use futures::stream::futures_unordered::FuturesUnordered;
@@ -25,7 +25,6 @@ const TIMER_RESOLUTION: u64 = 1_000;
 /// The commands that can be sent to the `Waiter`.
 #[derive(Debug)]
 pub enum WaiterMessage {
-    SyncBatches(HashMap<Digest, WorkerId>, Header),
     SyncParents(Vec<Digest>, Header),
 }
 
@@ -56,9 +55,6 @@ pub struct HeaderWaiter {
     /// Keeps the digests of the all certificates for which we sent a sync request,
     /// along with a timestamp (`u128`) indicating when we sent the request.
     parent_requests: HashMap<Digest, (Round, u128)>,
-    /// Keeps the digests of the all tx batches for which we sent a sync request,
-    /// similarly to `header_requests`.
-    batch_requests: HashMap<Digest, Round>,
     /// List of digests (either certificates, headers or tx batch) that are waiting
     /// to be processed. Their processing will resume when we get all their dependencies.
     pending: HashMap<Digest, (Round, Sender<()>)>,
@@ -90,7 +86,6 @@ impl HeaderWaiter {
                 tx_core,
                 network: SimpleSender::new(),
                 parent_requests: HashMap::new(),
-                batch_requests: HashMap::new(),
                 pending: HashMap::new(),
             }
             .run()
@@ -128,77 +123,6 @@ impl HeaderWaiter {
             tokio::select! {
                 Some(message) = self.rx_synchronizer.recv() => {
                     match message {
-                        WaiterMessage::SyncBatches(missing, header) => {
-                            let header_id = header.id.clone();
-                            let round = header.round;
-                            let author = header.author;
-                            let missing_count = missing.len();
-                            debug!(
-                                "Synching the payload of header {} (round {}): missing {} batch(es)",
-                                header_id,
-                                round,
-                                missing_count
-                            );
-
-                            // Ensure we sync only once per header.
-                            if self.pending.contains_key(&header_id) {
-                                debug!(
-                                    "Header {} (round {}) already in pending, skipping duplicate sync request",
-                                    header_id,
-                                    round
-                                );
-                                continue;
-                            }
-
-                            // Add the header to the waiter pool. The waiter will return it to when all
-                            // its parents are in the store.
-                            let wait_for: Vec<(Vec<u8>, Store)> = missing
-                                .iter()
-                                .map(|(digest, worker_id)| {
-                                    let key = [digest.as_ref(), &worker_id.to_le_bytes()].concat();
-                                    (key.to_vec(), self.store.clone())
-                                })
-                                .collect();
-                            let wait_for_count = wait_for.len();
-                            let (tx_cancel, rx_cancel) = channel(1);
-                            self.pending.insert(header_id.clone(), (round, tx_cancel));
-                            let fut = Self::waiter(wait_for, header, rx_cancel);
-                            waiting.push(fut);
-
-                            // Ensure we didn't already send a sync request for these parents.
-                            let mut requires_sync = HashMap::new();
-                            for (digest, worker_id) in missing.into_iter() {
-                                self.batch_requests.entry(digest.clone()).or_insert_with(|| {
-                                    requires_sync.entry(worker_id).or_insert_with(Vec::new).push(digest);
-                                    round
-                                });
-                            }
-                            for (worker_id, digests) in requires_sync {
-                                let address = self.committee
-                                    .worker(&author, &worker_id)
-                                    .expect("Author of valid header is not in the committee")
-                                    .primary_to_worker;
-                                debug!(
-                                    "Sending batch sync request for header {} (round {}): requesting {} batch(es) from worker {} at {}",
-                                    header_id,
-                                    round,
-                                    digests.len(),
-                                    worker_id,
-                                    address
-                                );
-                                let message = PrimaryWorkerMessage::Synchronize(digests, author);
-                                let bytes = bincode::serialize(&message)
-                                    .expect("Failed to serialize batch sync request");
-                                self.network.send(address, Bytes::from(bytes)).await;
-                            }
-                            debug!(
-                                "Header {} (round {}) added to waiter pool, waiting for {} batch(es) to arrive",
-                                header_id,
-                                round,
-                                wait_for_count
-                            );
-                        }
-
                         WaiterMessage::SyncParents(missing, header) => {
                             debug!("Synching the parents of {}", header);
                             let header_id = header.id.clone();
@@ -257,9 +181,6 @@ impl HeaderWaiter {
                             header.round
                         );
                         let _ = self.pending.remove(&header.id);
-                        for x in header.payload.keys() {
-                            let _ = self.batch_requests.remove(x);
-                        }
                         for x in &header.parents {
                             let _ = self.parent_requests.remove(x);
                         }
@@ -328,7 +249,6 @@ impl HeaderWaiter {
                     );
                 }
                 self.pending.retain(|_, (r, _)| r > &mut gc_round);
-                self.batch_requests.retain(|_, r| r > &mut gc_round);
                 self.parent_requests.retain(|_, (r, _)| r > &mut gc_round);
             }
         }

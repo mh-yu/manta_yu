@@ -210,6 +210,31 @@ class CloudLabBench:
                 )
         except Exception as e:
             Print.warn(f'Failed to generate adaptive wait stats: {e}')
+
+        vertex_size_script = Path(__file__).parent.parent / 'extract_vertex_size_stats.py'
+        vertex_size_output = run_dir / self._run_artifact_filename(
+            'vertex-size-stats', network_tag, rate
+        )
+        if not vertex_size_script.exists():
+            Print.warn(f'Vertex size stats script not found: {vertex_size_script}')
+            return
+
+        try:
+            import sys
+
+            vertex_size_result = subprocess.run(
+                [sys.executable, str(vertex_size_script), '--out', str(vertex_size_output)],
+                cwd=str(Path(__file__).parent.parent),
+                capture_output=True,
+                text=True,
+            )
+            if vertex_size_result.returncode != 0:
+                raise RuntimeError(
+                    f'extract_vertex_size_stats.py exited with code {vertex_size_result.returncode}: '
+                    f'{vertex_size_result.stderr.strip()}'
+                )
+        except Exception as e:
+            Print.warn(f'Failed to generate vertex size stats: {e}')
     
     def _get_connection_kwargs(self, host_info):
         """Get connection kwargs for a specific host (without port/timeout, passed separately)"""

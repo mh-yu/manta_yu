@@ -1,12 +1,11 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::error::DagResult;
 use crate::header_waiter::WaiterMessage;
-use crate::messages::{Certificate, Header};
+use crate::messages::{BatchPayload, Certificate, Header};
 use config::Committee;
 use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
 use log::debug;
-use std::collections::HashMap;
 use store::Store;
 use tokio::sync::mpsc::Sender;
 
@@ -49,43 +48,34 @@ impl Synchronizer {
         }
     }
 
-    /// Returns `true` if we have all transactions of the payload. If we don't, we return false,
-    /// synchronize with other nodes (through our workers), and re-schedule processing of the
-    /// header for when we will have its complete payload.
+    fn payload_storage_key(author: &PublicKey, digest: &Digest) -> Vec<u8> {
+        [author.as_ref(), digest.as_ref()].concat()
+    }
+
+    async fn persist_payload_if_missing(
+        &mut self,
+        author: &PublicKey,
+        digest: &Digest,
+        payload: &BatchPayload,
+    ) -> DagResult<()> {
+        let key = Self::payload_storage_key(author, digest);
+        if self.store.read(key.clone()).await?.is_none() {
+            let serialized =
+                bincode::serialize(payload).expect("Failed to serialize embedded batch payload");
+            self.store.write(key, serialized).await;
+        }
+        Ok(())
+    }
+
+    /// Returns `true` if the payload is missing. In the coupled design, payload travels inside
+    /// the header itself, so we only need to validate and persist those embedded batches before
+    /// voting.
     pub async fn missing_payload(&mut self, header: &Header) -> DagResult<bool> {
-        // We don't store the payload of our own workers.
-        if header.author == self.name {
-            return Ok(false);
+        for (digest, payload) in header.payload.iter() {
+            self.persist_payload_if_missing(&header.author, digest, payload)
+                .await?;
         }
-
-        let mut missing = HashMap::new();
-        for (digest, worker_id) in header.payload.iter() {
-            // Check whether we have the batch. If one of our worker has the batch, the primary stores the pair
-            // (digest, worker_id) in its own storage. It is important to verify that we received the batch
-            // from the correct worker id to prevent the following attack:
-            //      1. A Bad node sends a batch X to 2f good nodes through their worker #0.
-            //      2. The bad node proposes a malformed block containing the batch X and claiming it comes
-            //         from worker #1.
-            //      3. The 2f good nodes do not need to sync and thus don't notice that the header is malformed.
-            //         The bad node together with the 2f good nodes thus certify a block containing the batch X.
-            //      4. The last good node will never be able to sync as it will keep sending its sync requests
-            //         to workers #1 (rather than workers #0). Also, clients will never be able to retrieve batch
-            //         X as they will be querying worker #1.
-            let key = [digest.as_ref(), &worker_id.to_le_bytes()].concat();
-            if self.store.read(key).await?.is_none() {
-                missing.insert(digest.clone(), *worker_id);
-            }
-        }
-
-        if missing.is_empty() {
-            return Ok(false);
-        }
-
-        self.tx_header_waiter
-            .send(WaiterMessage::SyncBatches(missing, header.clone()))
-            .await
-            .expect("Failed to send sync batch request");
-        Ok(true)
+        Ok(false)
     }
 
     /// Returns the parents of a header if we have them all. If at least one parent is missing,
