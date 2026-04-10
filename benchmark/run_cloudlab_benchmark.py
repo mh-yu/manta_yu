@@ -9,7 +9,6 @@ import os
 import subprocess
 import argparse
 from pathlib import Path
-from datetime import datetime
 
 # Add benchmark directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -82,20 +81,8 @@ def process_logs(faults=0, save_to_file=True):
         # Print results
         print(result)
         
-        # Save to file
-        if save_to_file:
-            results_dir = Path(PathMaker.results_path())
-            results_dir.mkdir(parents=True, exist_ok=True)
-            
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            result_file = results_dir / f'benchmark_result_{timestamp}.txt'
-            
-            with open(result_file, 'w') as f:
-                f.write(f'Benchmark Results - {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
-                f.write('=' * 60 + '\n')
-                f.write(result)
-            
-            Print.info(f'\nResults saved to: {result_file}')
+        # Per-tag benchmark artifacts are already persisted by the CloudLab runner.
+        # Avoid writing an extra timestamped benchmark_result_*.txt summary here.
         
         # Export latency CSV
         csv_file = parser.export_latency_csv()
