@@ -10,6 +10,8 @@ use config::Committee;
 use crypto::Hash as _;
 use crypto::{Digest, PublicKey, SignatureService};
 use log::{debug, error, warn};
+#[cfg(feature = "benchmark")]
+use log::info;
 use network::{CancelHandler, ReliableSender};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,6 +42,9 @@ struct AdaptiveWaitState {
     proposal_parents: ProposalParents,
     waiting_vertices: HashMap<PublicKey, Digest>,
     deadline: Instant,
+    started_at: Instant,
+    initial_parent_count: usize,
+    extensions: usize,
 }
 
 pub struct Core {
@@ -77,10 +82,16 @@ pub struct Core {
     last_voted: HashMap<Round, HashSet<PublicKey>>,
     /// The set of headers we are currently processing.
     processing: HashMap<Round, HashSet<Digest>>,
+    /// Headers known locally (keyed by header id).
+    known_headers: HashMap<Digest, Header>,
     /// Our locally proposed headers waiting for quorum (keyed by header id).
     pending_headers: HashMap<Digest, Header>,
-    /// One vote aggregator per locally proposed header.
+    /// One vote aggregator per locally known header.
     votes_aggregators: HashMap<Digest, VotesAggregator>,
+    /// Votes received before their corresponding header becomes locally known.
+    buffered_votes: HashMap<Digest, Vec<Vote>>,
+    /// Tracks headers for which a certificate has already been formed or delivered.
+    certified_headers: HashMap<Digest, Round>,
     /// Aggregates certificates to use as parents for new headers.
     certificates_aggregators: HashMap<Round, Box<CertificatesAggregator>>,
     /// Tracks prepare-like support for headers of each (round, origin).
@@ -277,6 +288,43 @@ impl Core {
         changed
     }
 
+    async fn broadcast_certificate(&mut self, certificate: &Certificate) {
+        let cert_id = certificate.header.id.clone();
+        let cert_round = certificate.round();
+        debug!(
+            "Broadcasting certificate {} (round {}) to other primaries",
+            cert_id, cert_round
+        );
+        let addresses: Vec<_> = self
+            .committee
+            .others_primaries(&self.name)
+            .iter()
+            .map(|(_, x)| x.primary_to_primary)
+            .collect();
+        let bytes = bincode::serialize(&PrimaryMessage::Certificate(certificate.clone()))
+            .expect("Failed to serialize our own certificate");
+        for address in addresses {
+            let handler = self.network.send(address, Bytes::from(bytes.clone())).await;
+            let id = cert_id.clone();
+            tokio::spawn(async move {
+                match handler.await {
+                    Ok(_) => {
+                        debug!(
+                            "Certificate {} (round {}) successfully delivered to primary {}",
+                            id, cert_round, address
+                        );
+                    }
+                    Err(_) => {
+                        debug!(
+                            "Certificate {} (round {}) delivery to primary {} was canceled or failed",
+                            id, cert_round, address
+                        );
+                    }
+                }
+            });
+        }
+    }
+
     async fn update_adaptive_wait_round(
         &mut self,
         round: Round,
@@ -291,6 +339,7 @@ impl Core {
         }
 
         let now = Instant::now();
+        let had_existing_state = self.adaptive_wait_rounds.contains_key(&round);
         let mut state = self
             .adaptive_wait_rounds
             .remove(&round)
@@ -298,13 +347,44 @@ impl Core {
                 proposal_parents: ProposalParents::default(),
                 waiting_vertices: HashMap::new(),
                 deadline: now + self.adaptive_wait_delay,
+                started_at: now,
+                initial_parent_count: 0,
+                extensions: 0,
             });
-        let mut observed_progress = Self::merge_proposal_parents(&mut state.proposal_parents, parents);
+        let previous_parent_count = state.proposal_parents.parents.len();
+        let previous_waiting_count = state.waiting_vertices.len();
+        let mut observed_progress =
+            Self::merge_proposal_parents(&mut state.proposal_parents, parents);
         if self.rebuild_waiting_vertices(round, &mut state) {
             observed_progress = true;
         }
-        if observed_progress {
+
+        if state.waiting_vertices.is_empty() {
+            if had_existing_state {
+                self.log_adaptive_wait_release(round, &state, "resolved");
+            }
+            self.adaptive_wait_released.insert(round);
+            self.tx_proposer
+                .send((state.proposal_parents, round))
+                .await
+                .expect("Failed to send certificate");
+            return Ok(());
+        }
+
+        if !had_existing_state {
+            state.started_at = now;
+            state.initial_parent_count = state.proposal_parents.parents.len();
             state.deadline = now + self.adaptive_wait_delay;
+            self.log_adaptive_wait_start(round, &state);
+        } else if observed_progress {
+            state.deadline = now + self.adaptive_wait_delay;
+            state.extensions += 1;
+            self.log_adaptive_wait_extend(
+                round,
+                &state,
+                previous_parent_count,
+                previous_waiting_count,
+            );
         }
         self.adaptive_wait_rounds.insert(round, state);
         Ok(())
@@ -317,6 +397,74 @@ impl Core {
             .min()
     }
 
+    #[cfg(feature = "benchmark")]
+    fn log_adaptive_wait_start(&self, round: Round, state: &AdaptiveWaitState) {
+        info!(
+            "ADAPTIVE_WAIT_START round={} initial_parents={} waiting={} deadline_ms={}",
+            round,
+            state.initial_parent_count,
+            state.waiting_vertices.len(),
+            self.adaptive_wait_delay.as_millis()
+        );
+    }
+
+    #[cfg(not(feature = "benchmark"))]
+    fn log_adaptive_wait_start(&self, _round: Round, _state: &AdaptiveWaitState) {
+    }
+
+    #[cfg(feature = "benchmark")]
+    fn log_adaptive_wait_extend(
+        &self,
+        round: Round,
+        state: &AdaptiveWaitState,
+        previous_parent_count: usize,
+        previous_waiting_count: usize,
+    ) {
+        info!(
+            "ADAPTIVE_WAIT_EXTEND round={} parents_before={} parents_after={} waiting_before={} waiting_after={} extensions={}",
+            round,
+            previous_parent_count,
+            state.proposal_parents.parents.len(),
+            previous_waiting_count,
+            state.waiting_vertices.len(),
+            state.extensions
+        );
+    }
+
+    #[cfg(not(feature = "benchmark"))]
+    fn log_adaptive_wait_extend(
+        &self,
+        _round: Round,
+        _state: &AdaptiveWaitState,
+        _previous_parent_count: usize,
+        _previous_waiting_count: usize,
+    ) {
+    }
+
+    #[cfg(feature = "benchmark")]
+    fn log_adaptive_wait_release(&self, round: Round, state: &AdaptiveWaitState, reason: &str) {
+        info!(
+            "ADAPTIVE_WAIT_RELEASE round={} reason={} initial_parents={} final_parents={} gained_parents={} waiting_remaining={} extensions={} elapsed_ms={}",
+            round,
+            reason,
+            state.initial_parent_count,
+            state.proposal_parents.parents.len(),
+            state.proposal_parents.parents.len().saturating_sub(state.initial_parent_count),
+            state.waiting_vertices.len(),
+            state.extensions,
+            state.started_at.elapsed().as_millis()
+        );
+    }
+
+    #[cfg(not(feature = "benchmark"))]
+    fn log_adaptive_wait_release(
+        &self,
+        _round: Round,
+        _state: &AdaptiveWaitState,
+        _reason: &str,
+    ) {
+    }
+
     async fn flush_ready_adaptive_wait_rounds(&mut self) {
         let now = Instant::now();
         let ready_rounds: Vec<_> = self
@@ -327,6 +475,7 @@ impl Core {
 
         for round in ready_rounds {
             if let Some(state) = self.adaptive_wait_rounds.remove(&round) {
+                self.log_adaptive_wait_release(round, &state, "timeout");
                 self.adaptive_wait_released.insert(round);
                 self.tx_proposer
                     .send((state.proposal_parents, round))
@@ -370,8 +519,11 @@ impl Core {
                 gc_round: 0,
                 last_voted: HashMap::with_capacity(2 * gc_depth as usize),
                 processing: HashMap::with_capacity(2 * gc_depth as usize),
+                known_headers: HashMap::with_capacity(2 * gc_depth as usize),
                 pending_headers: HashMap::with_capacity(2 * gc_depth as usize),
                 votes_aggregators: HashMap::with_capacity(2 * gc_depth as usize),
+                buffered_votes: HashMap::with_capacity(2 * gc_depth as usize),
+                certified_headers: HashMap::with_capacity(2 * gc_depth as usize),
                 certificates_aggregators: HashMap::with_capacity(2 * gc_depth as usize),
                 vertex_round_states: HashMap::with_capacity(2 * gc_depth as usize),
                 adaptive_wait_rounds: HashMap::with_capacity(2 * gc_depth as usize),
@@ -515,9 +667,19 @@ impl Core {
         // Store the header.
         let bytes = bincode::serialize(header).expect("Failed to serialize header");
         self.store.write(header.id.to_vec(), bytes).await;
+        self.known_headers.insert(header.id.clone(), header.clone());
+        self.votes_aggregators
+            .entry(header.id.clone())
+            .or_insert_with(VotesAggregator::new);
         let header_progress = self.record_processed_header(header);
         if header_progress {
             self.track_adaptive_wait_progress(header.round);
+        }
+
+        if let Some(buffered_votes) = self.buffered_votes.remove(&header.id) {
+            for vote in buffered_votes {
+                self.process_vote(vote).await?;
+            }
         }
 
         // Check if we can vote for this header.
@@ -586,13 +748,25 @@ impl Core {
             self.track_adaptive_wait_progress(round);
         }
 
-        let header = match self.pending_headers.get(&vote_id) {
+        if self.certified_headers.contains_key(&vote_id) {
+            debug!(
+                "Ignoring vote for already certified header {} (round {})",
+                vote_id, vote.round
+            );
+            return Ok(());
+        }
+
+        let header = match self.known_headers.get(&vote_id) {
             Some(header) => header.clone(),
             None => {
                 debug!(
-                    "Ignoring vote for unknown/local-untracked header {} (round {})",
+                    "Buffering vote for header {} (round {}) until the header is locally available",
                     vote_id, vote.round
                 );
+                self.buffered_votes
+                    .entry(vote_id)
+                    .or_insert_with(Vec::new)
+                    .push(vote);
                 return Ok(());
             }
         };
@@ -603,8 +777,11 @@ impl Core {
             .entry(vote_id.clone())
             .or_insert_with(VotesAggregator::new);
         if let Some(certificate) = aggregator.append(vote, &self.committee, &header)? {
+            self.certified_headers
+                .insert(vote_id.clone(), certificate.round());
             self.pending_headers.remove(&vote_id);
             self.votes_aggregators.remove(&vote_id);
+            self.buffered_votes.remove(&vote_id);
             let origin = certificate.origin();
             let origin_node = self
                 .node_index(&origin)
@@ -622,44 +799,7 @@ impl Core {
                 header.round
             );
 
-            // Broadcast the certificate:
-            // 1. Local node assembles certificate from votes
-            // 2. Certificate is broadcast to all other primaries
-            // 3. Each primary delivers it to `Core::process_certificate`
-            let cert_id = certificate.header.id.clone();
-            let cert_round = certificate.round();
-            debug!(
-                "Broadcasting certificate {} (round {}) to other primaries",
-                cert_id, cert_round
-            );
-            let addresses: Vec<_> = self
-                .committee
-                .others_primaries(&self.name)
-                .iter()
-                .map(|(_, x)| x.primary_to_primary)
-                .collect();
-            let bytes = bincode::serialize(&PrimaryMessage::Certificate(certificate.clone()))
-                .expect("Failed to serialize our own certificate");
-            for address in addresses {
-                let handler = self.network.send(address, Bytes::from(bytes.clone())).await;
-                let id = cert_id.clone();
-                tokio::spawn(async move {
-                    match handler.await {
-                        Ok(_) => {
-                            debug!(
-                                "Certificate {} (round {}) successfully delivered to primary {}",
-                                id, cert_round, address
-                            );
-                        }
-                        Err(_) => {
-                            debug!(
-                                "Certificate {} (round {}) delivery to primary {} was canceled or failed",
-                                id, cert_round, address
-                            );
-                        }
-                    }
-                });
-            }
+            self.broadcast_certificate(&certificate).await;
 
             // Process the new certificate.
             self.process_certificate(certificate)
@@ -710,6 +850,12 @@ impl Core {
         // Store the certificate.
         let bytes = bincode::serialize(&certificate).expect("Failed to serialize certificate");
         self.store.write(certificate.digest().to_vec(), bytes).await;
+        self.known_headers
+            .insert(certificate.header.id.clone(), certificate.header.clone());
+        self.certified_headers
+            .insert(certificate.header.id.clone(), certificate.round());
+        self.votes_aggregators.remove(&certificate.header.id);
+        self.buffered_votes.remove(&certificate.header.id);
         let certificate_progress = self.record_certificate_delivery(&certificate);
         if certificate_progress {
             self.track_adaptive_wait_progress(certificate.round());

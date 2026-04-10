@@ -3,6 +3,7 @@ use super::*;
 use crate::common::{
     certificate, committee, committee_with_base_port, header, headers, keys, listener, votes,
 };
+use crypto::Signature;
 use futures::future::try_join_all;
 use std::fs;
 use tokio::sync::mpsc::channel;
@@ -440,4 +441,89 @@ async fn adaptive_wait_absorbs_late_certificate() {
     let expected_parents: HashSet<_> = certificates.iter().map(|x| x.digest()).collect();
     assert_eq!(received.1, 1);
     assert_eq!(received_parents, expected_parents);
+}
+
+#[tokio::test]
+async fn process_votes_for_known_remote_header() {
+    let mut all_keys = keys();
+    let (header_author, header_secret) = all_keys.pop().unwrap();
+    let (name, secret) = all_keys.pop().unwrap();
+    let signature_service = SignatureService::new(secret);
+
+    let committee = committee_with_base_port(13_300);
+
+    let (tx_sync_headers, _rx_sync_headers) = channel(1);
+    let (tx_sync_certificates, _rx_sync_certificates) = channel(1);
+    let (tx_primary_messages, rx_primary_messages) = channel(8);
+    let (_tx_headers_loopback, rx_headers_loopback) = channel(1);
+    let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
+    let (_tx_headers, rx_headers) = channel(1);
+    let (tx_consensus, mut rx_consensus) = channel(8);
+    let (tx_parents, _rx_parents) = channel(1);
+
+    let path = ".db_test_process_votes_for_known_remote_header";
+    let _ = fs::remove_dir_all(path);
+    let store = Store::new(path).unwrap();
+
+    let synchronizer = Synchronizer::new(
+        name,
+        &committee,
+        store.clone(),
+        tx_sync_headers,
+        tx_sync_certificates,
+    );
+
+    Core::spawn(
+        name,
+        committee.clone(),
+        store,
+        synchronizer,
+        signature_service,
+        Arc::new(AtomicU64::new(0)),
+        50,
+        rx_primary_messages,
+        rx_headers_loopback,
+        rx_certificates_loopback,
+        rx_headers,
+        tx_consensus,
+        tx_parents,
+    );
+
+    let remote_header = {
+        let header = Header {
+            author: header_author,
+            round: 1,
+            parents: Certificate::genesis(&committee)
+                .iter()
+                .map(|x| x.digest())
+                .collect(),
+            ..Header::default()
+        };
+        Header {
+            id: header.digest(),
+            signature: Signature::new(&header.digest(), &header_secret),
+            ..header
+        }
+    };
+
+    tx_primary_messages
+        .send(PrimaryMessage::Header(remote_header.clone()))
+        .await
+        .unwrap();
+
+    for vote in votes(&remote_header) {
+        tx_primary_messages
+            .send(PrimaryMessage::Vote(vote))
+            .await
+            .unwrap();
+    }
+
+    let delivered = tokio::time::timeout(
+        tokio::time::Duration::from_millis(300),
+        rx_consensus.recv(),
+    )
+    .await
+    .expect("remote header did not get certified in time")
+    .unwrap();
+    assert_eq!(delivered.header.id, remote_header.id);
 }

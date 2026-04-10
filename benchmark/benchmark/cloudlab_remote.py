@@ -183,6 +183,31 @@ class CloudLabBench:
                 )
         except Exception as e:
             Print.warn(f'Failed to generate valence stats: {e}')
+
+        adaptive_wait_script = Path(__file__).parent.parent / 'extract_adaptive_wait_stats.py'
+        adaptive_wait_output = run_dir / self._run_artifact_filename(
+            'adaptive-wait-stats', network_tag, rate
+        )
+        if not adaptive_wait_script.exists():
+            Print.warn(f'Adaptive wait stats script not found: {adaptive_wait_script}')
+            return
+
+        try:
+            import sys
+
+            wait_result = subprocess.run(
+                [sys.executable, str(adaptive_wait_script), '--out', str(adaptive_wait_output)],
+                cwd=str(Path(__file__).parent.parent),
+                capture_output=True,
+                text=True,
+            )
+            if wait_result.returncode != 0:
+                raise RuntimeError(
+                    f'extract_adaptive_wait_stats.py exited with code {wait_result.returncode}: '
+                    f'{wait_result.stderr.strip()}'
+                )
+        except Exception as e:
+            Print.warn(f'Failed to generate adaptive wait stats: {e}')
     
     def _get_connection_kwargs(self, host_info):
         """Get connection kwargs for a specific host (without port/timeout, passed separately)"""
