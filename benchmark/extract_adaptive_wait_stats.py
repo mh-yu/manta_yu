@@ -234,7 +234,7 @@ def summarize(parsed):
         for item in parsed[source]["releases"]:
             if item["gained"] > 0:
                 examples.append((item["gained"], source, item))
-    examples.sort(reverse=True)
+    examples.sort(key=lambda entry: (-entry[0], entry[1], entry[2]["round"]))
 
     if examples:
         lines.extend(["", "Top helpful releases:"])

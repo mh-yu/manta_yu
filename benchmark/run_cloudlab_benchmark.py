@@ -84,12 +84,14 @@ def process_logs(faults=0, save_to_file=True):
         # Per-tag benchmark artifacts are already persisted by the CloudLab runner.
         # Avoid writing an extra timestamped benchmark_result_*.txt summary here.
         
-        # Export latency CSV
-        csv_file = parser.export_latency_csv()
-        if csv_file:
-            Print.info(f'Latency CSV exported to: {csv_file}')
-        else:
-            Print.warn('Failed to export latency CSV (no latency data available)')
+        # Older/newer LogParser implementations may not expose latency CSV export.
+        export_latency_csv = getattr(parser, 'export_latency_csv', None)
+        if callable(export_latency_csv):
+            csv_file = export_latency_csv()
+            if csv_file:
+                Print.info(f'Latency CSV exported to: {csv_file}')
+            else:
+                Print.warn('Failed to export latency CSV (no latency data available)')
         
         return True
         

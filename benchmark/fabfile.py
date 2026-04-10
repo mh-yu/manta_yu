@@ -250,7 +250,7 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2):
         'tx_size': 512,
         'duration': 120,
         'runs': 2,
-        'network_tag': 'no-delay-wait',
+        'network_tag': '5-site-wait',
     }
     node_params = {
         'header_size': 1_000,  # bytes
