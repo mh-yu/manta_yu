@@ -6,6 +6,7 @@ from benchmark.logs import ParseError, LogParser
 from benchmark.utils import Print
 from benchmark.cloudlab_instance import CloudLabInstanceManager
 from benchmark.cloudlab_remote import CloudLabBench
+from benchmark.cloudlab_wan import CloudLabWan
 from benchmark.utils import BenchError
 
 # Import AWS remote benchmark module only when needed (lazy import).
@@ -237,6 +238,22 @@ def cloudlab_install(ctx):
 
 
 @task
+def cloudlab_wan(ctx, action='setup', settings_file='cloudlab_settings.json'):
+    ''' Emulate WAN RTT between sites (tc netem). action=setup|clear. Optional settings_file=... '''
+    try:
+        w = CloudLabWan(settings_file=settings_file)
+        act = (action or 'setup').lower()
+        if act == 'setup':
+            w.setup()
+        elif act == 'clear':
+            w.clear()
+        else:
+            Print.error('cloudlab_wan: use action=setup or action=clear')
+    except BenchError as e:
+        Print.error(e)
+
+
+@task
 def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2):
     ''' Run benchmarks on CloudLab '''
     bench_params = {
@@ -250,7 +267,7 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2):
         'tx_size': 512,
         'duration': 120,
         'runs': 2,
-        'network_tag': '5-site-wait',
+        'network_tag': 'no-delay-wait',
     }
     node_params = {
         'header_size': 1_000,  # bytes
