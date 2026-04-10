@@ -249,7 +249,7 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2):
         # 'rate': [40000, 60000, 80000, 100000, 120000, 140000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 2,
+        'runs': 1,
         'network_tag': 'no-delay',
     }
     node_params = {

@@ -203,30 +203,23 @@ impl Core {
             return Ok(());
         }
 
-        // Check the parent certificates. We allow commit-time weak edges from the whole
-        // solid-wave window, but only the solid-step window contributes to processing.
+        // Check the parent certificates. Weak edges are disabled: every parent must come
+        // from the immediately previous round and the processing quorum is evaluated from
+        // that strong-parent set only.
         let round = header.round as u64;
-        let solid_step_length = self.committee.solid_step_length();
-        let solid_wave_length = self.committee.solid_wave_length();
         let is_solid_step = self.committee.is_solid_step(round);
-        let step_index: Round = ((round - 1) % solid_step_length) + 1;
-        let wave_index: Round = ((round - 1) % solid_wave_length) + 1;
-        let regular_weak_start: Round = round.saturating_sub(step_index);
-        let commit_weak_start: Round = round.saturating_sub(wave_index);
 
         let mut stake = 0u64;
         let mut solid_step_union = HashSet::new();
 
         for x in &parents {
             ensure!(
-                x.round() >= commit_weak_start && x.round() < round,
+                x.round() + 1 == round,
                 DagError::MalformedHeader(header.id.clone())
             );
-            if x.round() >= regular_weak_start {
-                stake += self.committee.stake(&x.origin()) as u64;
-                if is_solid_step {
-                    solid_step_union.extend(x.header.solid_step_vertices_merged.iter().cloned());
-                }
+            stake += self.committee.stake(&x.origin()) as u64;
+            if is_solid_step {
+                solid_step_union.extend(x.header.solid_step_vertices_merged.iter().cloned());
             }
         }
 

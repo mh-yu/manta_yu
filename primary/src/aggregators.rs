@@ -61,7 +61,6 @@ pub struct CertificatesAggregator {
     expected_round: Round,
     weight: Stake,
     certificates: Vec<Digest>,
-    weak_certificates: Vec<Digest>,
     used: HashSet<PublicKey>,
     has_quorum: bool,
     /// Wait for several seconds after meeting the condition
@@ -82,7 +81,6 @@ impl CertificatesAggregator {
             expected_round,
             weight: 0,
             certificates: Vec::new(),
-            weak_certificates: Vec::new(),
             used: HashSet::new(),
             has_quorum: false,
             quorum_reached_time: None,
@@ -132,15 +130,9 @@ impl CertificatesAggregator {
             return Ok(None);
         }
 
-        // Accept parents from the whole solid-wave window, but only the newer
-        // solid-step sub-window contributes to processing/solid-step checks.
+        // Weak edges are disabled: only certificates from the immediately previous
+        // round can become parents of the next header.
         let current_round = self.expected_round + 1;
-        let step_len = committee.solid_step_length();
-        let wave_len = committee.solid_wave_length();
-        let step_index: Round = ((current_round - 1) % step_len) + 1;
-        let wave_index: Round = ((current_round - 1) % wave_len) + 1;
-        let regular_weak_start: Round = current_round.saturating_sub(step_index);
-        let commit_weak_start: Round = current_round.saturating_sub(wave_index);
 
         // Add the certificate to the appropriate list.
         if certificate.round() == self.expected_round {
@@ -148,30 +140,9 @@ impl CertificatesAggregator {
             self.extend_step_union(&certificate);
             self.extend_wave_union(&certificate);
             self.weight += committee.stake(&origin);
-        } else if certificate.round() >= regular_weak_start
-            && certificate.round() < self.expected_round
-        {
-            self.certificates.push(certificate.digest());
-            self.weak_certificates.push(certificate.digest());
-            self.extend_step_union(&certificate);
-            self.extend_wave_union(&certificate);
-        } else if certificate.round() >= commit_weak_start
-            && certificate.round() < regular_weak_start
-        {
-            self.certificates.push(certificate.digest());
-            self.weak_certificates.push(certificate.digest());
-            self.extend_wave_union(&certificate);
         } else {
             return Ok(None);
         }
-        debug!(
-            "Current round: {}, regular weak range: [{}..={}), commit-only weak range: [{}..={})",
-            current_round,
-            regular_weak_start,
-            self.expected_round,
-            commit_weak_start,
-            regular_weak_start
-        );
 
         let threshold = committee.processing_threshold(current_round);
         let is_solid_step = committee.is_solid_step(current_round);

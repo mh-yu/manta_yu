@@ -181,6 +181,17 @@ impl State {
         );
     }
 
+    fn round_has_bivalent(&self, round: Round) -> bool {
+        self.dag
+            .get(&round)
+            .map(|authorities| {
+                authorities
+                    .values()
+                    .any(|(_digest, _certificate, status)| *status == CommitStatus::Bivalent)
+            })
+            .unwrap_or(false)
+    }
+
     fn refresh_buffered_rounds(&mut self) {
         let rounds: Vec<_> = self.buffered_rounds.iter().copied().collect();
         for round in rounds {
@@ -308,7 +319,10 @@ impl Consensus {
         if round == 0 {
             return false;
         }
-        if state.fast_path_checked_rounds.contains(&round) {
+        let target_round = round.saturating_sub(1);
+        let allow_retry = state.fast_path_checked_rounds.contains(&round)
+            && state.round_has_bivalent(target_round);
+        if state.fast_path_checked_rounds.contains(&round) && !allow_retry {
             return false;
         }
         let Some(current_round_map) = state.dag.get(&round) else {
@@ -340,7 +354,9 @@ impl Consensus {
             .map(|(_, cert, _)| cert.clone())
             .collect();
 
-        // From this point, we count this round as checked exactly once.
+        // Record that this round has been checked at least once. If the previous
+        // round still contains bivalent vertices, later arrivals from the same
+        // round are allowed to re-run this check with the larger local view.
         state.fast_path_checked_rounds.insert(round);
 
         let threshold = self.committee.quorum_threshold();
@@ -421,102 +437,34 @@ impl Consensus {
     }
 
     async fn slow_path(&self, round: Round, state: &mut State) -> bool {
-        let step_length = self.committee.solid_step_length();
-        let wave_length = self.committee.solid_wave_length();
-        if step_length == 0 || wave_length == 0 || round < step_length {
+        // The current slow-path implementation follows the sigma=1 Chitu flow:
+        // a buffered round r is decided by the leader of round r+2, whose validity
+        // is checked from round r+3, and whose strong-observe relation to round r
+        // is witnessed by at least f+1 bridge vertices from round r+1.
+        if round < 3 {
             return false;
         }
 
-        let r = round - step_length;
-        if r % wave_length != 0 {
-            return false;
-        }
-        if r < 2 * wave_length {
-            return false;
-        }
+        let mut validity_cache = HashMap::new();
+        let mut decided_any = false;
+        let mut buffered_rounds: Vec<_> = state.buffered_rounds.iter().copied().collect();
+        buffered_rounds.sort_unstable();
 
-        let leader_round = r - wave_length;
-        let support_round = r - step_length;
-        if leader_round <= state.last_committed_leader_round {
-            return false;
-        }
-
-        let (leader_digest, leader) = match self.leader(leader_round, &state.dag) {
-            Some((digest, cert, _status)) => (digest.clone(), cert.clone()),
-            None => {
-                return false;
+        for buffered_round in buffered_rounds {
+            if buffered_round + 3 > round {
+                continue;
             }
-        };
-
-        let leader_header_id = leader.header.id.clone();
-
-        let Some(support_round_map) = state.dag.get(&support_round) else {
-            return false;
-        };
-
-        let mut support_nodes = Vec::new();
-        let mut stake = 0;
-        for (_, certificate, _status) in support_round_map.values() {
-            let vertices = &certificate.header.solid_wave_vertices;
-            let supports =
-                vertices.contains(&leader_header_id) || vertices.contains(&leader_digest);
-            let node_id = self.author_to_node_id(certificate.origin());
-
-            if supports {
-                support_nodes.push(node_id);
-                stake += self.committee.stake(&certificate.origin());
+            if self.try_decide_buffered_round(buffered_round, state, &mut validity_cache) {
+                decided_any = true;
             }
         }
 
-        support_nodes.sort_unstable();
-        let threshold = self.committee.validity_threshold();
-        let leader_node = self.author_to_node_id(leader.origin());
-        if stake < threshold {
-            info!(
-                "DAG_COMMIT_CHECK path=solid leader_round={} leader_node={} support_round={} support_basis=solid_wave_vertices stake={} threshold={} result=insufficient_stake support_set={:?}",
-                leader_round,
-                leader_node,
-                support_round,
-                stake,
-                threshold,
-                support_nodes
-            );
-            return false;
-        }
-
-        info!(
-            "DAG_COMMIT_CHECK path=solid leader_round={} leader_node={} support_round={} support_basis=solid_wave_vertices stake={} threshold={} result=committed support_set={:?}",
-            leader_round,
-            leader_node,
-            support_round,
-            stake,
-            threshold,
-            support_nodes
-        );
-
-        let leaders_to_commit: Vec<_> = self.order_leaders(&leader, state).into_iter().rev().collect();
-        let mut sequence = Vec::new();
-        for leader in &leaders_to_commit {
-            for x in self.order_dag(leader, state) {
-                if !state.record_commit(&x, true) {
-                    continue;
-                }
-                sequence.push(x);
-            }
-        }
-        self.collect_due_buffered_from_leader(
-            &leaders_to_commit,
-            leader_round,
-            wave_length,
-            state,
-            &mut sequence,
-        );
-
+        let sequence = self.collect_committable_buffered_rounds(state);
         if sequence.is_empty() {
-            return false;
+            state.refresh_buffered_rounds();
+            return decided_any;
         }
 
-        state.update_last_committed_leader(leader_round);
         state.cleanup_committed_history(self.gc_depth);
         state.refresh_buffered_rounds();
         self.emit_commits("slow", sequence).await;
@@ -546,6 +494,209 @@ impl Consensus {
         dag.get(&round).map(|x| x.get(&leader)).flatten()
     }
 
+    fn is_valid_leader_round(
+        &self,
+        leader_round: Round,
+        state: &State,
+        cache: &mut HashMap<Round, bool>,
+    ) -> bool {
+        if let Some(valid) = cache.get(&leader_round) {
+            return *valid;
+        }
+
+        let Some((leader_digest, leader, _status)) = self.leader(leader_round, &state.dag) else {
+            cache.insert(leader_round, false);
+            return false;
+        };
+
+        let direct_support_round = leader_round + 1;
+        let threshold = self.committee.validity_threshold();
+        let direct_support: Stake = state
+            .dag
+            .get(&direct_support_round)
+            .map(|support_round| {
+                support_round
+                    .values()
+                    .filter(|(_digest, certificate, _status)| {
+                        certificate.header.parents.contains(leader_digest)
+                    })
+                    .map(|(_digest, certificate, _status)| self.committee.stake(&certificate.origin()))
+                    .sum()
+            })
+            .unwrap_or(0);
+
+        if direct_support >= threshold {
+            cache.insert(leader_round, true);
+            return true;
+        }
+
+        let next_leader_round = leader_round + 1;
+        let recursive_valid = match self.leader(next_leader_round, &state.dag) {
+            Some((_next_digest, next_leader, _next_status)) => {
+                self.is_valid_leader_round(next_leader_round, state, cache)
+                    && next_leader.header.parents.contains(leader_digest)
+            }
+            None => false,
+        };
+
+        if recursive_valid {
+            let leader_node = self.author_to_node_id(leader.origin());
+            info!(
+                "LEADER_VALIDITY_RECURSIVE leader_round={} leader_node={} promoted_by_round={}",
+                leader_round,
+                leader_node,
+                next_leader_round
+            );
+        }
+        cache.insert(leader_round, recursive_valid);
+        recursive_valid
+    }
+
+    fn try_decide_buffered_round(
+        &self,
+        target_round: Round,
+        state: &mut State,
+        validity_cache: &mut HashMap<Round, bool>,
+    ) -> bool {
+        let bridge_round = target_round + 1;
+        let leader_round = target_round + 2;
+
+        let Some((_leader_digest, leader, _status)) = self.leader(leader_round, &state.dag) else {
+            return false;
+        };
+        if !self.is_valid_leader_round(leader_round, state, validity_cache) {
+            return false;
+        }
+
+        let bridge_round_entries: Vec<_> = match state.dag.get(&bridge_round) {
+            Some(round_map) => round_map
+                .values()
+                .map(|(digest, certificate, status)| (digest.clone(), certificate.clone(), *status))
+                .collect(),
+            None => return false,
+        };
+        let target_round_entries: Vec<_> = match state.dag.get(&target_round) {
+            Some(round_map) => round_map
+                .values()
+                .map(|(digest, certificate, status)| (digest.clone(), certificate.clone(), *status))
+                .collect(),
+            None => return false,
+        };
+        if bridge_round_entries.is_empty() || target_round_entries.is_empty() {
+            return false;
+        }
+
+        let threshold = self.committee.validity_threshold();
+        let leader_node = self.author_to_node_id(leader.origin());
+        let bivalent_candidates: Vec<_> = target_round_entries
+            .iter()
+            .filter_map(|(_digest, certificate, status)| {
+                if *status == CommitStatus::Bivalent {
+                    Some(certificate.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if bivalent_candidates.is_empty() {
+            return false;
+        }
+
+        let leader_parents = leader.header.parents.clone();
+        let mut changed = false;
+
+        for candidate in bivalent_candidates {
+            let candidate_digest = candidate.digest();
+            let support_stake: Stake = bridge_round_entries
+                .iter()
+                .filter(|(bridge_digest, bridge_certificate, _status)| {
+                    leader_parents.contains(bridge_digest)
+                        && bridge_certificate.header.parents.contains(&candidate_digest)
+                })
+                .map(|(_bridge_digest, bridge_certificate, _status)| {
+                    self.committee.stake(&bridge_certificate.origin())
+                })
+                .sum();
+            let node_id = self.author_to_node_id(candidate.origin());
+            let status = if support_stake >= threshold {
+                CommitStatus::OneValent
+            } else {
+                CommitStatus::ZeroValent
+            };
+            info!(
+                "SLOW_PATH_DECISION target_round={} leader_round={} leader_node={} candidate_round={} candidate_node={} bridge_round={} support_stake={} threshold={} decision={}",
+                target_round,
+                leader_round,
+                leader_node,
+                candidate.round(),
+                node_id,
+                bridge_round,
+                support_stake,
+                threshold,
+                match status {
+                    CommitStatus::OneValent => "one",
+                    CommitStatus::ZeroValent => "zero",
+                    _ => "unknown",
+                }
+            );
+            state.set_commit_status(&candidate, status);
+            changed = true;
+        }
+
+        changed
+    }
+
+    fn round_is_decided(&self, round: Round, state: &State) -> bool {
+        state
+            .dag
+            .get(&round)
+            .map(|authorities| {
+                authorities.values().all(|(_digest, _certificate, status)| {
+                    *status == CommitStatus::OneValent || *status == CommitStatus::ZeroValent
+                })
+            })
+            .unwrap_or(false)
+    }
+
+    fn collect_committable_buffered_rounds(&self, state: &mut State) -> Vec<Certificate> {
+        let mut rounds: Vec<_> = state.buffered_rounds.iter().copied().collect();
+        rounds.sort_unstable();
+
+        let mut sequence = Vec::new();
+        for round in rounds {
+            if !self.round_is_decided(round, state) {
+                break;
+            }
+
+            let one_valent: Vec<_> = state
+                .dag
+                .get(&round)
+                .map(|authorities| {
+                    authorities
+                        .values()
+                        .filter_map(|(_digest, certificate, status)| {
+                            if *status == CommitStatus::OneValent {
+                                Some(certificate.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            for certificate in self.collect_fast_path_commits(&one_valent, state) {
+                if state.record_commit(&certificate, true) {
+                    sequence.push(certificate);
+                }
+            }
+            state.buffered_rounds.remove(&round);
+        }
+
+        sequence.sort_by_key(|certificate| certificate.round());
+        sequence
+    }
+
     fn order_leaders(&self, leader: &Certificate, state: &State) -> Vec<Certificate> {
         let wave = self.committee.solid_wave_length() as usize;
         if wave == 0 {
@@ -571,7 +722,7 @@ impl Consensus {
         to_commit
     }
 
-    /// Find a parent certificate by digest in any ancestor round (< child_round).
+    /// Find a parent certificate by digest in the immediately previous round.
     fn find_parent_certificate<'a>(
         &self,
         state: &'a State,
@@ -583,11 +734,10 @@ impl Consensus {
         }
         state
             .find_certificate(parent_digest)
-            .filter(|(_, certificate, _)| certificate.round() < child_round)
+            .filter(|(_, certificate, _)| certificate.round() + 1 == child_round)
     }
 
-    /// Checks if there is a path between two leaders.
-    /// Unlike the original implementation, this traversal follows weak edges too.
+    /// Checks if there is a path between two leaders using strong parent edges only.
     fn linked(&self, leader: &Certificate, prev_leader: &Certificate, state: &State) -> bool {
         let target = prev_leader.digest();
         let mut stack = vec![leader];
