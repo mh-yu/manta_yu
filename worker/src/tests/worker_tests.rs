@@ -32,12 +32,6 @@ async fn handle_clients_transactions() {
     .unwrap();
     let handle = listener(primary_address, Some(Bytes::from(expected)));
 
-    // Spawn enough workers' listeners to acknowledge our batches.
-    for (_, addresses) in committee.others_workers(&name, &id) {
-        let address = addresses.worker_to_worker;
-        let _ = listener(address, /* expected */ None);
-    }
-
     // Send enough transactions to create a batch.
     let mut network = SimpleSender::new();
     let address = committee.worker(&name, &id).unwrap().transactions;

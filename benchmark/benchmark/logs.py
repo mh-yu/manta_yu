@@ -48,10 +48,10 @@ class LogParser:
                 'falling back to configured transaction size/rate values'
             )
             results = [
-                (default_client_size, rates[i], None, 0, {})
+                (default_client_size, rates[i], None, None, 0, {})
                 for i in range(len(clients))
             ]
-        self.size, self.rate, self.start, misses, self.sent_samples \
+        self.size, self.rate, self.start, self.client_end, misses, self.sent_samples \
             = zip(*results)
         self.misses = sum(misses)
 
@@ -61,9 +61,22 @@ class LogParser:
                 results = p.map(self._parse_primaries, primaries)
         except (ValueError, IndexError, AttributeError) as e:
             raise ParseError(f'Failed to parse nodes\' logs: {e}')
-        proposals, commits, self.configs, primary_ips = zip(*results)
+        (
+            proposals,
+            commits,
+            header_proposals,
+            header_commits,
+            header_sizes,
+            primary_end,
+            self.configs,
+            primary_ips,
+        ) = zip(*results)
         self.proposals = self._merge_results([x.items() for x in proposals])
         self.commits = self._merge_results([x.items() for x in commits])
+        self.header_proposals = self._merge_results([x.items() for x in header_proposals])
+        self.header_commits = self._merge_results([x.items() for x in header_commits])
+        self.header_sizes = self._merge_results([x.items() for x in header_sizes])
+        self.primary_end = primary_end
 
         # Parse the workers logs.
         try:
@@ -71,10 +84,11 @@ class LogParser:
                 results = p.map(self._parse_workers, workers)
         except (ValueError, IndexError, AttributeError) as e:
             raise ParseError(f'Failed to parse workers\' logs: {e}')
-        sizes, self.received_samples, workers_ips = zip(*results)
+        sizes, self.received_samples, workers_ips, worker_end = zip(*results)
         self.sizes = {
             k: v for x in sizes for k, v in x.items() if k in self.commits
         }
+        self.worker_end = worker_end
 
         # Determine whether the primary and the workers are collocated.
         self.collocate = set(primary_ips) == set(workers_ips)
@@ -108,8 +122,9 @@ class LogParser:
 
         tmp = findall(r'\[+([^\] \[]+) [^\]]*\] Sending sample transaction (\d+)', log)
         samples = {int(s): self._to_posix(t) for t, s in tmp}
+        end = max(samples.values()) if samples else self._last_timestamp(log)
 
-        return size, rate, start, misses, samples
+        return size, rate, start, end, misses, samples
 
     def _parse_primaries(self, log):
         if search(r'(?:panicked|Error)', log) is not None:
@@ -122,6 +137,28 @@ class LogParser:
         tmp = findall(r'\[+([^\] \[]+) [^\]]*\] Committed B\d+\([^ ]+\) -> ([^ ]+=)', log)
         tmp = [(d, self._to_posix(t)) for t, d in tmp]
         commits = self._merge_results([tmp])
+
+        tmp = findall(
+            r'\[+([^\] \[]+) [^\]]*\] VERTEX_SIZE round=(\d+) node=(\d+) header=[^ ]+ '
+            r'vertex_bytes=\d+ payload_bytes=(\d+) payload_entries=\d+ payload_txs=\d+',
+            log,
+        )
+        header_proposals = {(
+            int(round),
+            int(node),
+        ): self._to_posix(t) for t, round, node, _payload_bytes in tmp}
+        header_sizes = {
+            (int(round), int(node)): int(payload_bytes)
+            for _t, round, node, payload_bytes in tmp
+        }
+
+        tmp = findall(
+            r'\[+([^\] \[]+) [^\]]*\] DAG_COMMITTED path=[^ ]+ round=(\d+) node=(\d+) digest=[^ ]+',
+            log,
+        )
+        tmp = [((int(round), int(node)), self._to_posix(t)) for t, round, node in tmp]
+        header_commits = self._merge_results([tmp])
+        end = self._last_timestamp(log)
 
         configs = {
             'header_size': int(
@@ -149,7 +186,7 @@ class LogParser:
 
         ip = search(r'booted on (\d+.\d+.\d+.\d+)', log).group(1)
         
-        return proposals, commits, configs, ip
+        return proposals, commits, header_proposals, header_commits, header_sizes, end, configs, ip
 
     def _parse_workers(self, log):
         if search(r'(?:panic|Error)', log) is not None:
@@ -162,36 +199,76 @@ class LogParser:
         samples = {int(s): d for d, s in tmp}
 
         ip = search(r'booted on (\d+.\d+.\d+.\d+)', log).group(1)
+        end = self._last_timestamp(log)
 
-        return sizes, samples, ip
+        return sizes, samples, ip, end
 
     def _to_posix(self, string):
         normalized = string.strip().lstrip('[').rstrip(']')
         x = datetime.fromisoformat(normalized.replace('Z', '+00:00'))
         return datetime.timestamp(x)
 
+    def _last_timestamp(self, log):
+        tmp = findall(r'\[+([^\] \[]+) [^\]]*\]', log)
+        if not tmp:
+            return None
+        return self._to_posix(tmp[-1])
+
     def _consensus_throughput(self):
-        if not self.commits:
+        if not self.commits and not self.header_commits:
             return 0, 0, 0
-        start, end = min(self.proposals.values()), max(self.commits.values())
+
+        if self.sizes:
+            start, end = min(self.proposals.values()), max(self.commits.values())
+            bytes = sum(self.sizes.values())
+        else:
+            committed_headers = [
+                key for key in self.header_commits if key in self.header_sizes
+            ]
+            if not committed_headers or not self.header_proposals:
+                return 0, 0, 0
+            start = min(self.header_proposals.values())
+            end = max(self.header_commits[key] for key in committed_headers)
+            bytes = sum(self.header_sizes[key] for key in committed_headers)
+
         duration = end - start
-        bytes = sum(self.sizes.values())
         bps = bytes / duration
         tps = bps / self.size[0]
         return tps, bps, duration
 
     def _consensus_latency(self):
         latency = [c - self.proposals[d] for d, c in self.commits.items()]
+        if not latency:
+            latency = [
+                c - self.header_proposals[k]
+                for k, c in self.header_commits.items()
+                if k in self.header_proposals
+            ]
         return mean(latency) if latency else 0
 
     def _end_to_end_throughput(self):
-        if not self.commits:
+        if not self.commits and not self.header_commits:
             return 0, 0, 0
         start_candidates = [x for x in self.start if x is not None]
-        start = min(start_candidates) if start_candidates else min(self.proposals.values())
-        end = max(self.commits.values())
+
+        if self.sizes:
+            start = min(start_candidates) if start_candidates else min(self.proposals.values())
+            end = max(self.commits.values())
+            bytes = sum(self.sizes.values())
+        else:
+            committed_headers = [
+                key for key in self.header_commits if key in self.header_sizes
+            ]
+            if not committed_headers:
+                return 0, 0, 0
+            fallback_start = min(self.header_proposals.values()) if self.header_proposals else None
+            start = min(start_candidates) if start_candidates else fallback_start
+            if start is None:
+                return 0, 0, 0
+            end = max(self.header_commits[key] for key in committed_headers)
+            bytes = sum(self.header_sizes[key] for key in committed_headers)
+
         duration = end - start
-        bytes = sum(self.sizes.values())
         bps = bytes / duration
         tps = bps / self.size[0]
         return tps, bps, duration
@@ -207,6 +284,31 @@ class LogParser:
                     latency += [end-start]
         return mean(latency) if latency else 0
 
+    def _execution_duration(self):
+        start_candidates = [x for x in self.start if x is not None]
+        if start_candidates:
+            start = min(start_candidates)
+        else:
+            client_end_candidates = []
+            start = None
+
+        client_end_candidates = [x for x in self.client_end if x is not None]
+        if start is not None and client_end_candidates:
+            return max(client_end_candidates) - start
+
+        if start is None:
+            if self.header_proposals:
+                start = min(self.header_proposals.values())
+            elif self.proposals:
+                start = min(self.proposals.values())
+            else:
+                return 0
+
+        end_candidates = [x for x in (list(self.primary_end) + list(self.worker_end)) if x is not None]
+        if not end_candidates:
+            return 0
+        return max(end_candidates) - start
+
     def result(self):
         header_size = self.configs[0]['header_size']
         max_header_delay = self.configs[0]['max_header_delay']
@@ -215,6 +317,7 @@ class LogParser:
         sync_retry_nodes = self.configs[0]['sync_retry_nodes']
         batch_size = self.configs[0]['batch_size']
         max_batch_delay = self.configs[0]['max_batch_delay']
+        execution_duration = self._execution_duration()
 
         consensus_latency = self._consensus_latency() * 1_000
         consensus_tps, consensus_bps, _ = self._consensus_throughput()
@@ -233,7 +336,7 @@ class LogParser:
             f' Collocate primary and workers: {self.collocate}\n'
             f' Input rate: {sum(self.rate):,} tx/s\n'
             f' Transaction size: {self.size[0]:,} B\n'
-            f' Execution time: {round(duration):,} s\n'
+            f' Execution time: {round(execution_duration):,} s\n'
             '\n'
             f' Header size: {header_size:,} B\n'
             f' Max header delay: {max_header_delay:,} ms\n'
@@ -251,6 +354,7 @@ class LogParser:
             f' End-to-end TPS: {round(end_to_end_tps):,} tx/s\n'
             f' End-to-end BPS: {round(end_to_end_bps):,} B/s\n'
             f' End-to-end latency: {round(end_to_end_latency):,} ms\n'
+            f' Effective measurement window: {round(duration):,} s\n'
             '-----------------------------------------\n'
         )
 

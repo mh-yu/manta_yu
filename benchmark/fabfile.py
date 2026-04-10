@@ -274,8 +274,8 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2, enable_wait=True):
         'tx_size': 512,
         'duration': 120,
         'runs': 2,
-        'network_tag': 'geo55-wait',
-        'rtt_tag': '55',
+        'network_tag': 'geo415-wait-coupled',
+        'rtt_tag': '415',
     }
     node_params = {
         'header_size': 1_000,  # bytes
@@ -283,7 +283,7 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2, enable_wait=True):
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
-        'batch_size': 500_000,  # bytes
+        'batch_size': 128_000,  # bytes
         'max_batch_delay': 50,  # ms
         'sigma': 1,
         'kappa': 3,
