@@ -50,11 +50,12 @@ struct AdaptiveWaitState {
 #[derive(Default)]
 struct WaitCandidateSummary {
     authors_seen: usize,
-    known_candidates: usize,
-    fplus1_candidates: usize,
+    known_vertices: usize,
+    known_and_fplus1: usize,
+    known_but_support_insufficient: usize,
+    fplus1_without_header: usize,
     delivered_filtered: usize,
     equivocation_filtered: usize,
-    insufficient_support: usize,
     waiting_final: usize,
 }
 
@@ -316,31 +317,32 @@ impl Core {
                     summary.equivocation_filtered += 1;
                     continue;
                 }
-                let (digest, source) = if let Some(digest) = vertex_state.known_digest.clone() {
-                    (Some(digest), "known")
-                } else {
-                    (
-                        vertex_state
+                let has_fplus1_support = vertex_state
+                    .prepare_support
+                    .values()
+                    .any(|support| support.weight >= prepare_threshold);
+                let digest = match vertex_state.known_digest.clone() {
+                    Some(digest) => {
+                        summary.known_vertices += 1;
+                        let known_support = vertex_state
                             .prepare_support
-                            .iter()
-                            .find_map(|(digest, support)| {
-                                (support.weight >= prepare_threshold).then_some(digest.clone())
-                            }),
-                        "fplus1",
-                    )
-                };
-                let digest = match digest {
-                    Some(digest) => digest,
+                            .get(&digest)
+                            .map(|support| support.weight)
+                            .unwrap_or_default();
+                        if known_support < prepare_threshold {
+                            summary.known_but_support_insufficient += 1;
+                            continue;
+                        }
+                        summary.known_and_fplus1 += 1;
+                        digest
+                    }
                     None => {
-                        summary.insufficient_support += 1;
+                        if has_fplus1_support {
+                            summary.fplus1_without_header += 1;
+                        }
                         continue;
                     }
                 };
-                if source == "known" {
-                    summary.known_candidates += 1;
-                } else {
-                    summary.fplus1_candidates += 1;
-                }
                 if delivered.contains(&digest) {
                     summary.delivered_filtered += 1;
                     continue;
@@ -491,15 +493,16 @@ impl Core {
         decision: &str,
     ) {
         info!(
-            "ADAPTIVE_WAIT_CANDIDATES round={} parents={} authors_seen={} known_candidates={} fplus1_candidates={} delivered_filtered={} equivocation_filtered={} insufficient_support={} waiting_final={} decision={}",
+            "ADAPTIVE_WAIT_CANDIDATES round={} parents={} authors_seen={} known_vertices={} known_and_fplus1={} known_but_support_insufficient={} fplus1_without_header={} delivered_filtered={} equivocation_filtered={} waiting_final={} decision={}",
             round,
             parent_count,
             summary.authors_seen,
-            summary.known_candidates,
-            summary.fplus1_candidates,
+            summary.known_vertices,
+            summary.known_and_fplus1,
+            summary.known_but_support_insufficient,
+            summary.fplus1_without_header,
             summary.delivered_filtered,
             summary.equivocation_filtered,
-            summary.insufficient_support,
             summary.waiting_final,
             decision,
         );

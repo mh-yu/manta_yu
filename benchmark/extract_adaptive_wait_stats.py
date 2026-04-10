@@ -16,9 +16,12 @@ START_RE = re.compile(
 )
 CANDIDATES_RE = re.compile(
     r"ADAPTIVE_WAIT_CANDIDATES round=(?P<round>\d+) parents=(?P<parents>\d+) "
-    r"authors_seen=(?P<authors_seen>\d+) known_candidates=(?P<known>\d+) "
-    r"fplus1_candidates=(?P<fplus1>\d+) delivered_filtered=(?P<delivered>\d+) "
-    r"equivocation_filtered=(?P<equivocation>\d+) insufficient_support=(?P<insufficient>\d+) "
+    r"authors_seen=(?P<authors_seen>\d+) known_vertices=(?P<known_vertices>\d+) "
+    r"known_and_fplus1=(?P<known_and_fplus1>\d+) "
+    r"known_but_support_insufficient=(?P<known_but_support_insufficient>\d+) "
+    r"fplus1_without_header=(?P<fplus1_without_header>\d+) "
+    r"delivered_filtered=(?P<delivered>\d+) "
+    r"equivocation_filtered=(?P<equivocation>\d+) "
     r"waiting_final=(?P<waiting>\d+) decision=(?P<decision>\S+)"
 )
 EXTEND_RE = re.compile(
@@ -57,11 +60,12 @@ def parse_logs(paths):
             "candidate_wait_decisions": 0,
             "candidate_direct_parent_decisions": 0,
             "candidate_authors_seen": 0,
-            "candidate_known": 0,
-            "candidate_fplus1": 0,
+            "candidate_known_vertices": 0,
+            "candidate_known_and_fplus1": 0,
+            "candidate_known_but_support_insufficient": 0,
+            "candidate_fplus1_without_header": 0,
             "candidate_delivered_filtered": 0,
             "candidate_equivocation_filtered": 0,
-            "candidate_insufficient_support": 0,
             "starts": 0,
             "extends": 0,
             "releases": [],
@@ -91,11 +95,12 @@ def parse_logs(paths):
                 elif match := CANDIDATES_RE.search(line):
                     stats[source]["candidate_checks"] += 1
                     stats[source]["candidate_authors_seen"] += int(match.group("authors_seen"))
-                    stats[source]["candidate_known"] += int(match.group("known"))
-                    stats[source]["candidate_fplus1"] += int(match.group("fplus1"))
+                    stats[source]["candidate_known_vertices"] += int(match.group("known_vertices"))
+                    stats[source]["candidate_known_and_fplus1"] += int(match.group("known_and_fplus1"))
+                    stats[source]["candidate_known_but_support_insufficient"] += int(match.group("known_but_support_insufficient"))
+                    stats[source]["candidate_fplus1_without_header"] += int(match.group("fplus1_without_header"))
                     stats[source]["candidate_delivered_filtered"] += int(match.group("delivered"))
                     stats[source]["candidate_equivocation_filtered"] += int(match.group("equivocation"))
-                    stats[source]["candidate_insufficient_support"] += int(match.group("insufficient"))
                     if match.group("decision") == "wait":
                         stats[source]["candidate_wait_decisions"] += 1
                     else:
@@ -142,11 +147,12 @@ def summarize(parsed):
     total_candidate_wait_decisions = 0
     total_candidate_direct_parent_decisions = 0
     total_candidate_authors_seen = 0
-    total_candidate_known = 0
-    total_candidate_fplus1 = 0
+    total_candidate_known_vertices = 0
+    total_candidate_known_and_fplus1 = 0
+    total_candidate_known_but_support_insufficient = 0
+    total_candidate_fplus1_without_header = 0
     total_candidate_delivered_filtered = 0
     total_candidate_equivocation_filtered = 0
-    total_candidate_insufficient_support = 0
     lines = ["Adaptive Wait Summary", "=====================", ""]
 
     for source in sorted(parsed):
@@ -157,11 +163,12 @@ def summarize(parsed):
         total_candidate_wait_decisions += parsed[source]["candidate_wait_decisions"]
         total_candidate_direct_parent_decisions += parsed[source]["candidate_direct_parent_decisions"]
         total_candidate_authors_seen += parsed[source]["candidate_authors_seen"]
-        total_candidate_known += parsed[source]["candidate_known"]
-        total_candidate_fplus1 += parsed[source]["candidate_fplus1"]
+        total_candidate_known_vertices += parsed[source]["candidate_known_vertices"]
+        total_candidate_known_and_fplus1 += parsed[source]["candidate_known_and_fplus1"]
+        total_candidate_known_but_support_insufficient += parsed[source]["candidate_known_but_support_insufficient"]
+        total_candidate_fplus1_without_header += parsed[source]["candidate_fplus1_without_header"]
         total_candidate_delivered_filtered += parsed[source]["candidate_delivered_filtered"]
         total_candidate_equivocation_filtered += parsed[source]["candidate_equivocation_filtered"]
-        total_candidate_insufficient_support += parsed[source]["candidate_insufficient_support"]
         total_releases += len(releases)
         helpful = sum(1 for item in releases if item["gained"] > 0)
         helpful_releases += helpful
@@ -209,11 +216,12 @@ def summarize(parsed):
             f"Decision=wait: {total_candidate_wait_decisions}",
             f"Decision=direct_parent: {total_candidate_direct_parent_decisions}",
             f"Candidate authors seen: {total_candidate_authors_seen}",
-            f"Known-digest candidates: {total_candidate_known}",
-            f"F+1-only candidates: {total_candidate_fplus1}",
+            f"Known vertices seen: {total_candidate_known_vertices}",
+            f"Known+F+1 candidates: {total_candidate_known_and_fplus1}",
+            f"Known but support insufficient: {total_candidate_known_but_support_insufficient}",
+            f"F+1 without header: {total_candidate_fplus1_without_header}",
             f"Delivered-filtered candidates: {total_candidate_delivered_filtered}",
             f"Equivocation-filtered candidates: {total_candidate_equivocation_filtered}",
-            f"Insufficient-support authors: {total_candidate_insufficient_support}",
         ]
     )
 
