@@ -131,6 +131,21 @@ impl Core {
             || existing.solid_wave_union.len() != old_wave
     }
 
+    async fn delivered_header_ids_for_parents(
+        &mut self,
+        parents: &[Digest],
+    ) -> HashSet<Digest> {
+        let mut delivered = HashSet::with_capacity(parents.len());
+        for parent_digest in parents {
+            if let Ok(Some(bytes)) = self.store.read(parent_digest.to_vec()).await {
+                if let Ok(certificate) = bincode::deserialize::<Certificate>(&bytes) {
+                    delivered.insert(certificate.header.id);
+                }
+            }
+        }
+        delivered
+    }
+
     fn record_processed_header(&mut self, header: &Header) -> bool {
         let state = self
             .vertex_round_states
@@ -236,11 +251,13 @@ impl Core {
         true
     }
 
-    fn rebuild_waiting_vertices(&self, round: Round, state: &mut AdaptiveWaitState) -> bool {
+    async fn rebuild_waiting_vertices(&mut self, round: Round, state: &mut AdaptiveWaitState) -> bool {
         let old_waiting = state.waiting_vertices.clone();
         state.waiting_vertices.clear();
 
-        let delivered: HashSet<_> = state.proposal_parents.parents.iter().cloned().collect();
+        let delivered = self
+            .delivered_header_ids_for_parents(&state.proposal_parents.parents)
+            .await;
         let prepare_threshold = self.committee.validity_threshold() as u64;
         if let Some(per_author) = self.vertex_round_states.get(&round) {
             for (origin, vertex_state) in per_author {
@@ -272,10 +289,10 @@ impl Core {
         state.waiting_vertices != old_waiting
     }
 
-    fn track_adaptive_wait_progress(&mut self, round: Round) -> bool {
+    async fn track_adaptive_wait_progress(&mut self, round: Round) -> bool {
         let mut changed = false;
         if let Some(mut state) = self.adaptive_wait_rounds.remove(&round) {
-            changed = self.rebuild_waiting_vertices(round, &mut state);
+            changed = self.rebuild_waiting_vertices(round, &mut state).await;
             if changed && !state.waiting_vertices.is_empty() {
                 state.extensions += 1;
             }
@@ -350,7 +367,7 @@ impl Core {
         let previous_waiting_count = state.waiting_vertices.len();
         let mut observed_progress =
             Self::merge_proposal_parents(&mut state.proposal_parents, parents);
-        if self.rebuild_waiting_vertices(round, &mut state) {
+        if self.rebuild_waiting_vertices(round, &mut state).await {
             observed_progress = true;
         }
 
@@ -658,7 +675,7 @@ impl Core {
             .or_insert_with(VotesAggregator::new);
         let header_progress = self.record_processed_header(header);
         if header_progress {
-            self.track_adaptive_wait_progress(header.round);
+            self.track_adaptive_wait_progress(header.round).await;
         }
 
         if let Some(buffered_votes) = self.buffered_votes.remove(&header.id) {
@@ -730,7 +747,7 @@ impl Core {
         let round = vote.round;
         let vote_progress = self.record_prepare_vote(&vote);
         if vote_progress {
-            self.track_adaptive_wait_progress(round);
+            self.track_adaptive_wait_progress(round).await;
         }
 
         if self.certified_headers.contains_key(&vote_id) {
@@ -843,7 +860,7 @@ impl Core {
         self.buffered_votes.remove(&certificate.header.id);
         let certificate_progress = self.record_certificate_delivery(&certificate);
         if certificate_progress {
-            self.track_adaptive_wait_progress(certificate.round());
+            self.track_adaptive_wait_progress(certificate.round()).await;
         }
 
         // Aggregate certificates by their own round instead of a single global current_round.
