@@ -43,6 +43,7 @@ struct AdaptiveWaitState {
     waiting_vertices: HashMap<PublicKey, Digest>,
     started_at: Instant,
     initial_parent_count: usize,
+    initial_parent_digests: HashSet<Digest>,
     extensions: usize,
 }
 
@@ -129,6 +130,39 @@ impl Core {
         existing.parents.len() != old_parents
             || existing.solid_step_union.len() != old_step
             || existing.solid_wave_union.len() != old_wave
+    }
+
+    #[cfg(feature = "benchmark")]
+    fn sorted_digest_strings<'a, I>(digests: I) -> Vec<String>
+    where
+        I: IntoIterator<Item = &'a Digest>,
+    {
+        let mut values: Vec<_> = digests
+            .into_iter()
+            .map(|digest| format!("{:?}", digest))
+            .collect();
+        values.sort();
+        values
+    }
+
+    #[cfg(feature = "benchmark")]
+    fn gained_parent_digest_strings(state: &AdaptiveWaitState) -> Vec<String> {
+        Self::sorted_digest_strings(
+            state
+                .proposal_parents
+                .parents
+                .iter()
+                .filter(|digest| !state.initial_parent_digests.contains(*digest)),
+        )
+    }
+
+    #[cfg(feature = "benchmark")]
+    fn format_digest_list(digests: &[String]) -> String {
+        if digests.is_empty() {
+            "-".to_string()
+        } else {
+            digests.join(",")
+        }
     }
 
     async fn delivered_header_ids_for_parents(
@@ -361,6 +395,7 @@ impl Core {
                 waiting_vertices: HashMap::new(),
                 started_at: now,
                 initial_parent_count: 0,
+                initial_parent_digests: HashSet::new(),
                 extensions: 0,
             });
         let previous_parent_count = state.proposal_parents.parents.len();
@@ -386,6 +421,7 @@ impl Core {
         if !had_existing_state {
             state.started_at = now;
             state.initial_parent_count = state.proposal_parents.parents.len();
+            state.initial_parent_digests = state.proposal_parents.parents.iter().cloned().collect();
             self.log_adaptive_wait_start(round, &state);
         } else if observed_progress {
             state.extensions += 1;
@@ -423,14 +459,17 @@ impl Core {
         previous_parent_count: usize,
         previous_waiting_count: usize,
     ) {
+        let gained_parent_digests = Self::gained_parent_digest_strings(state);
         info!(
-            "ADAPTIVE_WAIT_EXTEND round={} parents_before={} parents_after={} waiting_before={} waiting_after={} extensions={}",
+            "ADAPTIVE_WAIT_EXTEND round={} parents_before={} parents_after={} waiting_before={} waiting_after={} extensions={} total_gained_parents={} gained_parent_digests={}",
             round,
             previous_parent_count,
             state.proposal_parents.parents.len(),
             previous_waiting_count,
             state.waiting_vertices.len(),
-            state.extensions
+            state.extensions,
+            gained_parent_digests.len(),
+            Self::format_digest_list(&gained_parent_digests)
         );
     }
 
@@ -446,13 +485,15 @@ impl Core {
 
     #[cfg(feature = "benchmark")]
     fn log_adaptive_wait_release(&self, round: Round, state: &AdaptiveWaitState, reason: &str) {
+        let gained_parent_digests = Self::gained_parent_digest_strings(state);
         info!(
-            "ADAPTIVE_WAIT_RELEASE round={} reason={} initial_parents={} final_parents={} gained_parents={} waiting_remaining={} extensions={} elapsed_ms={}",
+            "ADAPTIVE_WAIT_RELEASE round={} reason={} initial_parents={} final_parents={} gained_parents={} gained_parent_digests={} waiting_remaining={} extensions={} elapsed_ms={}",
             round,
             reason,
             state.initial_parent_count,
             state.proposal_parents.parents.len(),
-            state.proposal_parents.parents.len().saturating_sub(state.initial_parent_count),
+            gained_parent_digests.len(),
+            Self::format_digest_list(&gained_parent_digests),
             state.waiting_vertices.len(),
             state.extensions,
             state.started_at.elapsed().as_millis()

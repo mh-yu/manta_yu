@@ -18,12 +18,18 @@ EXTEND_RE = re.compile(
     r"ADAPTIVE_WAIT_EXTEND round=(?P<round>\d+) parents_before=(?P<before>\d+) "
     r"parents_after=(?P<after>\d+) waiting_before=(?P<waiting_before>\d+) "
     r"waiting_after=(?P<waiting_after>\d+) extensions=(?P<extensions>\d+)"
+    r"(?: total_gained_parents=(?P<gained>\d+) gained_parent_digests=(?P<digests>\S+))?"
 )
 RELEASE_RE = re.compile(
     r"ADAPTIVE_WAIT_RELEASE round=(?P<round>\d+) reason=(?P<reason>\S+) "
     r"initial_parents=(?P<initial>\d+) final_parents=(?P<final>\d+) "
-    r"gained_parents=(?P<gained>\d+) waiting_remaining=(?P<waiting>\d+) "
+    r"gained_parents=(?P<gained>\d+)"
+    r"(?: gained_parent_digests=(?P<digests>\S+))? "
+    r"waiting_remaining=(?P<waiting>\d+) "
     r"extensions=(?P<extensions>\d+) elapsed_ms=(?P<elapsed>\d+)"
+)
+COMMITTED_RE = re.compile(
+    r"DAG_COMMITTED path=(?P<path>fast|slow) round=(?P<round>\d+) node=(?P<node>\d+) digest=(?P<digest>\S+)"
 )
 
 
@@ -31,8 +37,22 @@ def default_logs():
     return sorted(glob.glob("logs/primary-*.log"))
 
 
+def parse_digest_list(raw):
+    if raw == "-":
+        return []
+    return [digest for digest in raw.split(",") if digest]
+
+
 def parse_logs(paths):
-    stats = defaultdict(lambda: {"starts": 0, "extends": 0, "releases": []})
+    stats = defaultdict(
+        lambda: {
+            "starts": 0,
+            "extends": 0,
+            "releases": [],
+            "fast_committed": set(),
+            "slow_committed": set(),
+        }
+    )
 
     for path in paths:
         if not os.path.exists(path):
@@ -55,6 +75,7 @@ def parse_logs(paths):
                 elif match := EXTEND_RE.search(line):
                     stats[source]["extends"] += 1
                 elif match := RELEASE_RE.search(line):
+                    gained_parent_digests = parse_digest_list(match.group("digests") or "-")
                     stats[source]["releases"].append(
                         {
                             "round": int(match.group("round")),
@@ -62,12 +83,19 @@ def parse_logs(paths):
                             "initial": int(match.group("initial")),
                             "final": int(match.group("final")),
                             "gained": int(match.group("gained")),
+                            "gained_parent_digests": gained_parent_digests,
                             "waiting": int(match.group("waiting")),
                             "extensions": int(match.group("extensions")),
                             "elapsed": int(match.group("elapsed")),
                             "line_no": line_no,
                         }
                     )
+                elif match := COMMITTED_RE.search(line):
+                    digest = match.group("digest")
+                    if match.group("path") == "fast":
+                        stats[source]["fast_committed"].add(digest)
+                    else:
+                        stats[source]["slow_committed"].add(digest)
     return stats
 
 
@@ -75,22 +103,43 @@ def summarize(parsed):
     total_releases = 0
     helpful_releases = 0
     total_gained = 0
+    total_fast_path_promoted = 0
+    total_slow_path_promoted = 0
+    unique_gained_vertices = set()
+    unique_fast_path_promoted = set()
+    unique_slow_path_promoted = set()
     timeout_releases = 0
     resolved_releases = 0
     lines = ["Adaptive Wait Summary", "=====================", ""]
 
     for source in sorted(parsed):
         releases = parsed[source]["releases"]
+        fast_committed = parsed[source]["fast_committed"]
+        slow_committed = parsed[source]["slow_committed"]
         total_releases += len(releases)
         helpful = sum(1 for item in releases if item["gained"] > 0)
         helpful_releases += helpful
         total_gained += sum(item["gained"] for item in releases)
         timeout_releases += sum(1 for item in releases if item["reason"] == "timeout")
         resolved_releases += sum(1 for item in releases if item["reason"] == "resolved")
+        gained_digests = {
+            digest
+            for item in releases
+            for digest in item["gained_parent_digests"]
+        }
+        fast_promoted = gained_digests & fast_committed
+        slow_promoted = gained_digests & slow_committed
+        total_fast_path_promoted += len(fast_promoted)
+        total_slow_path_promoted += len(slow_promoted)
+        unique_gained_vertices.update(gained_digests)
+        unique_fast_path_promoted.update(fast_promoted)
+        unique_slow_path_promoted.update(slow_promoted)
 
         lines.append(
             f"{source}: starts={parsed[source]['starts']} extends={parsed[source]['extends']} "
-            f"releases={len(releases)} helpful={helpful}"
+            f"releases={len(releases)} helpful={helpful} "
+            f"gained_vertices={len(gained_digests)} fast_path_promoted={len(fast_promoted)} "
+            f"slow_path_promoted={len(slow_promoted)}"
         )
 
     lines.extend(
@@ -101,6 +150,11 @@ def summarize(parsed):
             f"Timeout releases: {timeout_releases}",
             f"Resolved releases: {resolved_releases}",
             f"Total gained parents: {total_gained}",
+            f"Unique gained parent vertices: {len(unique_gained_vertices)}",
+            f"Wait-promoted fast-path committed vertices: {total_fast_path_promoted}",
+            f"Unique wait-promoted fast-path vertices: {len(unique_fast_path_promoted)}",
+            f"Wait-promoted slow-path committed vertices: {total_slow_path_promoted}",
+            f"Unique wait-promoted slow-path vertices: {len(unique_slow_path_promoted)}",
         ]
     )
 
@@ -120,7 +174,9 @@ def summarize(parsed):
         for gained, source, item in examples[:10]:
             lines.append(
                 f"  {source} round={item['round']} gained={gained} "
-                f"reason={item['reason']} elapsed_ms={item['elapsed']} extensions={item['extensions']}"
+                f"reason={item['reason']} elapsed_ms={item['elapsed']} "
+                f"extensions={item['extensions']} "
+                f"fast_path_promoted={len(set(item['gained_parent_digests']) & parsed[source]['fast_committed'])}"
             )
 
     return "\n".join(lines) + "\n"
