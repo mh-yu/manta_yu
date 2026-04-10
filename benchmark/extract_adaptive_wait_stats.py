@@ -5,6 +5,7 @@ Summarize ADAPTIVE_WAIT_* benchmark logs from primary logs.
 
 import argparse
 import glob
+import math
 import os
 import re
 from collections import defaultdict
@@ -51,6 +52,48 @@ def parse_digest_list(raw):
     if raw == "-":
         return []
     return [digest for digest in raw.split(",") if digest]
+
+
+def percentile(values, pct):
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    rank = (pct / 100.0) * (len(ordered) - 1)
+    lower = math.floor(rank)
+    upper = math.ceil(rank)
+    if lower == upper:
+        return float(ordered[lower])
+    weight = rank - lower
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * weight
+
+
+def format_distribution(label, values, precision=1):
+    if not values:
+        return f"{label}: n=0"
+    stats = {
+        "min": min(values),
+        "p50": percentile(values, 50),
+        "p90": percentile(values, 90),
+        "p95": percentile(values, 95),
+        "p99": percentile(values, 99),
+        "max": max(values),
+        "avg": sum(values) / len(values),
+    }
+    return (
+        f"{label}: n={len(values)} "
+        f"min={stats['min']:.{precision}f} avg={stats['avg']:.{precision}f} "
+        f"p50={stats['p50']:.{precision}f} p90={stats['p90']:.{precision}f} "
+        f"p95={stats['p95']:.{precision}f} p99={stats['p99']:.{precision}f} "
+        f"max={stats['max']:.{precision}f}"
+    )
+
+
+def gained_bucket_label(gained):
+    if gained >= 4:
+        return "4+"
+    return str(gained)
 
 
 def parse_logs(paths):
@@ -153,6 +196,13 @@ def summarize(parsed):
     total_candidate_fplus1_without_header = 0
     total_candidate_delivered_filtered = 0
     total_candidate_equivocation_filtered = 0
+    all_release_elapsed = []
+    all_release_gained = []
+    helpful_release_elapsed = []
+    elapsed_per_gained_parent = []
+    elapsed_per_fast_path_promoted = []
+    gained_buckets = defaultdict(int)
+    longest_releases = []
     lines = ["Adaptive Wait Summary", "=====================", ""]
 
     for source in sorted(parsed):
@@ -187,6 +237,21 @@ def summarize(parsed):
         unique_gained_vertices.update(gained_digests)
         unique_fast_path_promoted.update(fast_promoted)
         unique_slow_path_promoted.update(slow_promoted)
+        for item in releases:
+            gained_set = set(item["gained_parent_digests"])
+            item["fast_path_promoted_count"] = len(gained_set & fast_committed)
+            item["slow_path_promoted_count"] = len(gained_set & slow_committed)
+            all_release_elapsed.append(item["elapsed"])
+            all_release_gained.append(item["gained"])
+            gained_buckets[gained_bucket_label(item["gained"])] += 1
+            longest_releases.append((item["elapsed"], source, item))
+            if item["gained"] > 0:
+                helpful_release_elapsed.append(item["elapsed"])
+                elapsed_per_gained_parent.append(item["elapsed"] / item["gained"])
+            if item["fast_path_promoted_count"] > 0:
+                elapsed_per_fast_path_promoted.append(
+                    item["elapsed"] / item["fast_path_promoted_count"]
+                )
 
         lines.append(
             f"{source}: candidate_checks={parsed[source]['candidate_checks']} "
@@ -225,9 +290,72 @@ def summarize(parsed):
         ]
     )
 
+    if total_candidate_checks:
+        lines.extend(
+            [
+                (
+                    f"Wait decision ratio: "
+                    f"{total_candidate_wait_decisions / total_candidate_checks:.2%}"
+                ),
+                (
+                    f"Direct-parent ratio: "
+                    f"{total_candidate_direct_parent_decisions / total_candidate_checks:.2%}"
+                ),
+            ]
+        )
+    if total_candidate_authors_seen:
+        lines.extend(
+            [
+                (
+                    f"Known vertex rate: "
+                    f"{total_candidate_known_vertices / total_candidate_authors_seen:.2%}"
+                ),
+                (
+                    f"Known+F+1 rate: "
+                    f"{total_candidate_known_and_fplus1 / total_candidate_authors_seen:.2%}"
+                ),
+                (
+                    f"F+1-without-header rate: "
+                    f"{total_candidate_fplus1_without_header / total_candidate_authors_seen:.2%}"
+                ),
+            ]
+        )
+    if total_candidate_known_vertices:
+        lines.append(
+            "Known-but-support-insufficient rate: "
+            f"{total_candidate_known_but_support_insufficient / total_candidate_known_vertices:.2%}"
+        )
+
     if total_releases:
         avg_gain = total_gained / total_releases
         lines.append(f"Average gained parents per release: {avg_gain:.2f}")
+        lines.extend(
+            [
+                "",
+                "Wait elapsed_ms distribution:",
+                f"  {format_distribution('all releases', all_release_elapsed, precision=1)}",
+                f"  {format_distribution('helpful releases', helpful_release_elapsed, precision=1)}",
+                "",
+                "Gained parents distribution:",
+                f"  {format_distribution('gained_parents', all_release_gained, precision=2)}",
+                (
+                    "  gained bucket counts: "
+                    f"0={gained_buckets['0']} "
+                    f"1={gained_buckets['1']} "
+                    f"2={gained_buckets['2']} "
+                    f"3={gained_buckets['3']} "
+                    f"4+={gained_buckets['4+']}"
+                ),
+                "",
+                "Benefit / cost ratios:",
+                (
+                    f"  {format_distribution('elapsed_ms_per_gained_parent', elapsed_per_gained_parent, precision=2)}"
+                ),
+                (
+                    f"  {format_distribution('elapsed_ms_per_fast_path_promotion', elapsed_per_fast_path_promoted, precision=2)}"
+                ),
+            ]
+        )
 
     examples = []
     for source in sorted(parsed):
@@ -235,6 +363,7 @@ def summarize(parsed):
             if item["gained"] > 0:
                 examples.append((item["gained"], source, item))
     examples.sort(key=lambda entry: (-entry[0], entry[1], entry[2]["round"]))
+    longest_releases.sort(key=lambda entry: (-entry[0], entry[1], entry[2]["round"]))
 
     if examples:
         lines.extend(["", "Top helpful releases:"])
@@ -243,7 +372,18 @@ def summarize(parsed):
                 f"  {source} round={item['round']} gained={gained} "
                 f"reason={item['reason']} elapsed_ms={item['elapsed']} "
                 f"extensions={item['extensions']} "
-                f"fast_path_promoted={len(set(item['gained_parent_digests']) & parsed[source]['fast_committed'])}"
+                f"fast_path_promoted={item['fast_path_promoted_count']}"
+            )
+
+    if longest_releases:
+        lines.extend(["", "Longest wait releases:"])
+        for elapsed, source, item in longest_releases[:10]:
+            lines.append(
+                f"  {source} round={item['round']} elapsed_ms={elapsed} "
+                f"gained={item['gained']} reason={item['reason']} "
+                f"extensions={item['extensions']} "
+                f"fast_path_promoted={item['fast_path_promoted_count']} "
+                f"slow_path_promoted={item['slow_path_promoted_count']}"
             )
 
     return "\n".join(lines) + "\n"
