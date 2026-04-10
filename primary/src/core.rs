@@ -47,6 +47,17 @@ struct AdaptiveWaitState {
     extensions: usize,
 }
 
+#[derive(Default)]
+struct WaitCandidateSummary {
+    authors_seen: usize,
+    known_candidates: usize,
+    fplus1_candidates: usize,
+    delivered_filtered: usize,
+    equivocation_filtered: usize,
+    insufficient_support: usize,
+    waiting_final: usize,
+}
+
 pub struct Core {
     /// The public key of this primary.
     name: PublicKey,
@@ -285,48 +296,67 @@ impl Core {
         true
     }
 
-    async fn rebuild_waiting_vertices(&mut self, round: Round, state: &mut AdaptiveWaitState) -> bool {
+    async fn rebuild_waiting_vertices(
+        &mut self,
+        round: Round,
+        state: &mut AdaptiveWaitState,
+    ) -> (bool, WaitCandidateSummary) {
         let old_waiting = state.waiting_vertices.clone();
         state.waiting_vertices.clear();
+        let mut summary = WaitCandidateSummary::default();
 
         let delivered = self
             .delivered_header_ids_for_parents(&state.proposal_parents.parents)
             .await;
         let prepare_threshold = self.committee.validity_threshold() as u64;
         if let Some(per_author) = self.vertex_round_states.get(&round) {
+            summary.authors_seen = per_author.len();
             for (origin, vertex_state) in per_author {
                 if vertex_state.equivocating {
+                    summary.equivocation_filtered += 1;
                     continue;
                 }
-                let digest = vertex_state
-                    .known_digest
-                    .clone()
-                    .or_else(|| {
+                let (digest, source) = if let Some(digest) = vertex_state.known_digest.clone() {
+                    (Some(digest), "known")
+                } else {
+                    (
                         vertex_state
                             .prepare_support
                             .iter()
                             .find_map(|(digest, support)| {
                                 (support.weight >= prepare_threshold).then_some(digest.clone())
-                            })
-                    });
+                            }),
+                        "fplus1",
+                    )
+                };
                 let digest = match digest {
                     Some(digest) => digest,
-                    None => continue,
+                    None => {
+                        summary.insufficient_support += 1;
+                        continue;
+                    }
                 };
+                if source == "known" {
+                    summary.known_candidates += 1;
+                } else {
+                    summary.fplus1_candidates += 1;
+                }
                 if delivered.contains(&digest) {
+                    summary.delivered_filtered += 1;
                     continue;
                 }
                 state.waiting_vertices.insert(*origin, digest);
             }
         }
 
-        state.waiting_vertices != old_waiting
+        summary.waiting_final = state.waiting_vertices.len();
+        (state.waiting_vertices != old_waiting, summary)
     }
 
     async fn track_adaptive_wait_progress(&mut self, round: Round) -> bool {
         let mut changed = false;
         if let Some(mut state) = self.adaptive_wait_rounds.remove(&round) {
-            changed = self.rebuild_waiting_vertices(round, &mut state).await;
+            (changed, _) = self.rebuild_waiting_vertices(round, &mut state).await;
             if changed && !state.waiting_vertices.is_empty() {
                 state.extensions += 1;
             }
@@ -402,8 +432,24 @@ impl Core {
         let previous_waiting_count = state.waiting_vertices.len();
         let mut observed_progress =
             Self::merge_proposal_parents(&mut state.proposal_parents, parents);
-        if self.rebuild_waiting_vertices(round, &mut state).await {
+        let (waiting_changed, candidate_summary) =
+            self.rebuild_waiting_vertices(round, &mut state).await;
+        if waiting_changed {
             observed_progress = true;
+        }
+
+        if !had_existing_state {
+            let decision = if state.waiting_vertices.is_empty() {
+                "direct_parent"
+            } else {
+                "wait"
+            };
+            self.log_adaptive_wait_candidates(
+                round,
+                state.proposal_parents.parents.len(),
+                &candidate_summary,
+                decision,
+            );
         }
 
         if state.waiting_vertices.is_empty() {
@@ -434,6 +480,39 @@ impl Core {
         }
         self.adaptive_wait_rounds.insert(round, state);
         Ok(())
+    }
+
+    #[cfg(feature = "benchmark")]
+    fn log_adaptive_wait_candidates(
+        &self,
+        round: Round,
+        parent_count: usize,
+        summary: &WaitCandidateSummary,
+        decision: &str,
+    ) {
+        info!(
+            "ADAPTIVE_WAIT_CANDIDATES round={} parents={} authors_seen={} known_candidates={} fplus1_candidates={} delivered_filtered={} equivocation_filtered={} insufficient_support={} waiting_final={} decision={}",
+            round,
+            parent_count,
+            summary.authors_seen,
+            summary.known_candidates,
+            summary.fplus1_candidates,
+            summary.delivered_filtered,
+            summary.equivocation_filtered,
+            summary.insufficient_support,
+            summary.waiting_final,
+            decision,
+        );
+    }
+
+    #[cfg(not(feature = "benchmark"))]
+    fn log_adaptive_wait_candidates(
+        &self,
+        _round: Round,
+        _parent_count: usize,
+        _summary: &WaitCandidateSummary,
+        _decision: &str,
+    ) {
     }
 
     #[cfg(feature = "benchmark")]

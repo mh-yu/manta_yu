@@ -14,6 +14,13 @@ START_RE = re.compile(
     r"ADAPTIVE_WAIT_START round=(?P<round>\d+) initial_parents=(?P<initial>\d+) "
     r"waiting=(?P<waiting>\d+) deadline_ms=(?P<deadline>\d+)"
 )
+CANDIDATES_RE = re.compile(
+    r"ADAPTIVE_WAIT_CANDIDATES round=(?P<round>\d+) parents=(?P<parents>\d+) "
+    r"authors_seen=(?P<authors_seen>\d+) known_candidates=(?P<known>\d+) "
+    r"fplus1_candidates=(?P<fplus1>\d+) delivered_filtered=(?P<delivered>\d+) "
+    r"equivocation_filtered=(?P<equivocation>\d+) insufficient_support=(?P<insufficient>\d+) "
+    r"waiting_final=(?P<waiting>\d+) decision=(?P<decision>\S+)"
+)
 EXTEND_RE = re.compile(
     r"ADAPTIVE_WAIT_EXTEND round=(?P<round>\d+) parents_before=(?P<before>\d+) "
     r"parents_after=(?P<after>\d+) waiting_before=(?P<waiting_before>\d+) "
@@ -46,6 +53,15 @@ def parse_digest_list(raw):
 def parse_logs(paths):
     stats = defaultdict(
         lambda: {
+            "candidate_checks": 0,
+            "candidate_wait_decisions": 0,
+            "candidate_direct_parent_decisions": 0,
+            "candidate_authors_seen": 0,
+            "candidate_known": 0,
+            "candidate_fplus1": 0,
+            "candidate_delivered_filtered": 0,
+            "candidate_equivocation_filtered": 0,
+            "candidate_insufficient_support": 0,
             "starts": 0,
             "extends": 0,
             "releases": [],
@@ -72,6 +88,18 @@ def parse_logs(paths):
                             "line_no": line_no,
                         }
                     )
+                elif match := CANDIDATES_RE.search(line):
+                    stats[source]["candidate_checks"] += 1
+                    stats[source]["candidate_authors_seen"] += int(match.group("authors_seen"))
+                    stats[source]["candidate_known"] += int(match.group("known"))
+                    stats[source]["candidate_fplus1"] += int(match.group("fplus1"))
+                    stats[source]["candidate_delivered_filtered"] += int(match.group("delivered"))
+                    stats[source]["candidate_equivocation_filtered"] += int(match.group("equivocation"))
+                    stats[source]["candidate_insufficient_support"] += int(match.group("insufficient"))
+                    if match.group("decision") == "wait":
+                        stats[source]["candidate_wait_decisions"] += 1
+                    else:
+                        stats[source]["candidate_direct_parent_decisions"] += 1
                 elif match := EXTEND_RE.search(line):
                     stats[source]["extends"] += 1
                 elif match := RELEASE_RE.search(line):
@@ -110,12 +138,30 @@ def summarize(parsed):
     unique_slow_path_promoted = set()
     timeout_releases = 0
     resolved_releases = 0
+    total_candidate_checks = 0
+    total_candidate_wait_decisions = 0
+    total_candidate_direct_parent_decisions = 0
+    total_candidate_authors_seen = 0
+    total_candidate_known = 0
+    total_candidate_fplus1 = 0
+    total_candidate_delivered_filtered = 0
+    total_candidate_equivocation_filtered = 0
+    total_candidate_insufficient_support = 0
     lines = ["Adaptive Wait Summary", "=====================", ""]
 
     for source in sorted(parsed):
         releases = parsed[source]["releases"]
         fast_committed = parsed[source]["fast_committed"]
         slow_committed = parsed[source]["slow_committed"]
+        total_candidate_checks += parsed[source]["candidate_checks"]
+        total_candidate_wait_decisions += parsed[source]["candidate_wait_decisions"]
+        total_candidate_direct_parent_decisions += parsed[source]["candidate_direct_parent_decisions"]
+        total_candidate_authors_seen += parsed[source]["candidate_authors_seen"]
+        total_candidate_known += parsed[source]["candidate_known"]
+        total_candidate_fplus1 += parsed[source]["candidate_fplus1"]
+        total_candidate_delivered_filtered += parsed[source]["candidate_delivered_filtered"]
+        total_candidate_equivocation_filtered += parsed[source]["candidate_equivocation_filtered"]
+        total_candidate_insufficient_support += parsed[source]["candidate_insufficient_support"]
         total_releases += len(releases)
         helpful = sum(1 for item in releases if item["gained"] > 0)
         helpful_releases += helpful
@@ -136,7 +182,10 @@ def summarize(parsed):
         unique_slow_path_promoted.update(slow_promoted)
 
         lines.append(
-            f"{source}: starts={parsed[source]['starts']} extends={parsed[source]['extends']} "
+            f"{source}: candidate_checks={parsed[source]['candidate_checks']} "
+            f"decision_wait={parsed[source]['candidate_wait_decisions']} "
+            f"decision_direct_parent={parsed[source]['candidate_direct_parent_decisions']} "
+            f"starts={parsed[source]['starts']} extends={parsed[source]['extends']} "
             f"releases={len(releases)} helpful={helpful} "
             f"gained_vertices={len(gained_digests)} fast_path_promoted={len(fast_promoted)} "
             f"slow_path_promoted={len(slow_promoted)}"
@@ -155,6 +204,16 @@ def summarize(parsed):
             f"Unique wait-promoted fast-path vertices: {len(unique_fast_path_promoted)}",
             f"Wait-promoted slow-path committed vertices: {total_slow_path_promoted}",
             f"Unique wait-promoted slow-path vertices: {len(unique_slow_path_promoted)}",
+            "",
+            f"Candidate checks: {total_candidate_checks}",
+            f"Decision=wait: {total_candidate_wait_decisions}",
+            f"Decision=direct_parent: {total_candidate_direct_parent_decisions}",
+            f"Candidate authors seen: {total_candidate_authors_seen}",
+            f"Known-digest candidates: {total_candidate_known}",
+            f"F+1-only candidates: {total_candidate_fplus1}",
+            f"Delivered-filtered candidates: {total_candidate_delivered_filtered}",
+            f"Equivocation-filtered candidates: {total_candidate_equivocation_filtered}",
+            f"Insufficient-support authors: {total_candidate_insufficient_support}",
         ]
     )
 
