@@ -140,12 +140,14 @@ class CloudLabBench:
         run_index,
         trigger_attack,
         network_tag,
+        rtt_tag,
     ):
         summary_path = run_dir / self._run_artifact_filename(
             'summary', network_tag, rate
         )
         summary_text = (
             f'network_tag: {self._sanitize_network_tag(network_tag)}\n'
+            f"rtt_tag: {rtt_tag if rtt_tag else 'N/A'}\n"
             f'run_index: {run_index + 1}/{bench_parameters.runs}\n'
             f'nodes: {nodes}\n'
             f'rate: {rate}\n'
@@ -1605,6 +1607,7 @@ SCRIPTEOF'''
         network_tag = self._sanitize_network_tag(
             bench_parameters_dict.get('network_tag', 'default')
         )
+        rtt_tag = str(bench_parameters_dict.get('rtt_tag', '') or '').strip()
         
         # Extract trigger_attack from bench_parameters_dict (optional)
         # Support both single value and list (like rate and nodes)
@@ -1623,7 +1626,7 @@ SCRIPTEOF'''
         bench_params_for_parsing = {
             k: v
             for k, v in bench_parameters_dict.items()
-            if k not in ('trigger_attack', 'network_tag')
+            if k not in ('trigger_attack', 'network_tag', 'rtt_tag')
         }
         
         try:
@@ -1704,6 +1707,7 @@ SCRIPTEOF'''
                                 run,
                                 trigger_attack,
                                 network_tag,
+                                rtt_tag,
                             )
                             Print.info(f'Per-run artifacts saved to: {run_dir}')
                         except (subprocess.SubprocessError, GroupException, ParseError) as e:
