@@ -16,10 +16,31 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use store::Store;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::time::{sleep_until, Duration, Instant};
 
 #[cfg(test)]
 #[path = "tests/core_tests.rs"]
 pub mod core_tests;
+
+#[derive(Default)]
+struct PrepareSupport {
+    weight: u64,
+    voters: HashSet<PublicKey>,
+}
+
+#[derive(Default)]
+struct VertexRoundState {
+    known_digest: Option<Digest>,
+    certified_digest: Option<Digest>,
+    prepare_support: HashMap<Digest, PrepareSupport>,
+    equivocating: bool,
+}
+
+struct AdaptiveWaitState {
+    proposal_parents: ProposalParents,
+    waiting_vertices: HashMap<PublicKey, Digest>,
+    deadline: Instant,
+}
 
 pub struct Core {
     /// The public key of this primary.
@@ -62,6 +83,14 @@ pub struct Core {
     votes_aggregators: HashMap<Digest, VotesAggregator>,
     /// Aggregates certificates to use as parents for new headers.
     certificates_aggregators: HashMap<Round, Box<CertificatesAggregator>>,
+    /// Tracks prepare-like support for headers of each (round, origin).
+    vertex_round_states: HashMap<Round, HashMap<PublicKey, VertexRoundState>>,
+    /// Adaptive wait state keyed by the parent round that is about to unlock the next round.
+    adaptive_wait_rounds: HashMap<Round, AdaptiveWaitState>,
+    /// Rounds that already paid the adaptive-wait gap and can be refreshed directly.
+    adaptive_wait_released: HashSet<Round>,
+    /// Short adaptive wait window; renewed whenever a waiting round observes progress.
+    adaptive_wait_delay: Duration,
     /// A network sender to send the batches to the other workers.
     network: ReliableSender,
     /// Keeps the cancel handlers of the messages we sent.
@@ -74,6 +103,237 @@ impl Core {
             .authorities
             .keys()
             .position(|authority| authority == key)
+    }
+
+    fn merge_proposal_parents(existing: &mut ProposalParents, update: ProposalParents) -> bool {
+        let old_parents = existing.parents.len();
+        let old_step = existing.solid_step_union.len();
+        let old_wave = existing.solid_wave_union.len();
+
+        let mut merged_parents: HashSet<Digest> = existing.parents.drain(..).collect();
+        merged_parents.extend(update.parents);
+        existing.parents = merged_parents.into_iter().collect();
+        existing.solid_step_union.extend(update.solid_step_union);
+        existing.solid_wave_union.extend(update.solid_wave_union);
+
+        existing.parents.len() != old_parents
+            || existing.solid_step_union.len() != old_step
+            || existing.solid_wave_union.len() != old_wave
+    }
+
+    fn record_processed_header(&mut self, header: &Header) -> bool {
+        let state = self
+            .vertex_round_states
+            .entry(header.round)
+            .or_insert_with(HashMap::new)
+            .entry(header.author)
+            .or_insert_with(VertexRoundState::default);
+
+        match &state.known_digest {
+            Some(existing) if existing != &header.id => {
+                state.equivocating = true;
+                true
+            }
+            Some(_) => false,
+            None => {
+                state.known_digest = Some(header.id.clone());
+                true
+            }
+        }
+    }
+
+    fn record_prepare_vote(&mut self, vote: &Vote) -> bool {
+        let threshold = self.committee.validity_threshold() as u64;
+        let state = self
+            .vertex_round_states
+            .entry(vote.round)
+            .or_insert_with(HashMap::new)
+            .entry(vote.origin)
+            .or_insert_with(VertexRoundState::default);
+
+        let support = state
+            .prepare_support
+            .entry(vote.id.clone())
+            .or_insert_with(PrepareSupport::default);
+        let inserted = support.voters.insert(vote.author);
+        if inserted {
+            support.weight += self.committee.stake(&vote.author) as u64;
+        }
+
+        if state.equivocating {
+            return inserted;
+        }
+
+        if let Some(known) = &state.known_digest {
+            if known != &vote.id && support.weight >= threshold {
+                state.equivocating = true;
+                return true;
+            }
+        }
+        if let Some(certified) = &state.certified_digest {
+            if certified != &vote.id && support.weight >= threshold {
+                state.equivocating = true;
+                return true;
+            }
+        }
+
+        let sufficiently_supported = state
+            .prepare_support
+            .values()
+            .filter(|candidate| candidate.weight >= threshold)
+            .count();
+        if sufficiently_supported > 1 {
+            state.equivocating = true;
+            return true;
+        }
+
+        inserted
+    }
+
+    fn record_certificate_delivery(&mut self, certificate: &Certificate) -> bool {
+        let threshold = self.committee.validity_threshold() as u64;
+        let state = self
+            .vertex_round_states
+            .entry(certificate.round())
+            .or_insert_with(HashMap::new)
+            .entry(certificate.origin())
+            .or_insert_with(VertexRoundState::default);
+
+        if let Some(existing) = &state.certified_digest {
+            if existing == &certificate.header.id {
+                return false;
+            }
+            state.equivocating = true;
+            return true;
+        }
+
+        state.certified_digest = Some(certificate.header.id.clone());
+
+        if let Some(known) = &state.known_digest {
+            if known != &certificate.header.id {
+                state.equivocating = true;
+                return true;
+            }
+        }
+
+        for (digest, support) in &state.prepare_support {
+            if digest != &certificate.header.id && support.weight >= threshold {
+                state.equivocating = true;
+                return true;
+            }
+        }
+
+        true
+    }
+
+    fn rebuild_waiting_vertices(&self, round: Round, state: &mut AdaptiveWaitState) -> bool {
+        let old_waiting = state.waiting_vertices.clone();
+        state.waiting_vertices.clear();
+
+        let delivered: HashSet<_> = state.proposal_parents.parents.iter().cloned().collect();
+        let prepare_threshold = self.committee.validity_threshold() as u64;
+        if let Some(per_author) = self.vertex_round_states.get(&round) {
+            for (origin, vertex_state) in per_author {
+                if vertex_state.equivocating {
+                    continue;
+                }
+                let digest = vertex_state
+                    .known_digest
+                    .clone()
+                    .or_else(|| {
+                        vertex_state
+                            .prepare_support
+                            .iter()
+                            .find_map(|(digest, support)| {
+                                (support.weight >= prepare_threshold).then_some(digest.clone())
+                            })
+                    });
+                let digest = match digest {
+                    Some(digest) => digest,
+                    None => continue,
+                };
+                if delivered.contains(&digest) {
+                    continue;
+                }
+                if vertex_state.certified_digest.as_ref() == Some(&digest) {
+                    continue;
+                }
+                state.waiting_vertices.insert(*origin, digest);
+            }
+        }
+
+        state.waiting_vertices != old_waiting
+    }
+
+    fn track_adaptive_wait_progress(&mut self, round: Round) -> bool {
+        let mut changed = false;
+        if let Some(mut state) = self.adaptive_wait_rounds.remove(&round) {
+            changed = self.rebuild_waiting_vertices(round, &mut state);
+            if changed {
+                state.deadline = Instant::now() + self.adaptive_wait_delay;
+            }
+            self.adaptive_wait_rounds.insert(round, state);
+        }
+        changed
+    }
+
+    async fn update_adaptive_wait_round(
+        &mut self,
+        round: Round,
+        parents: ProposalParents,
+    ) -> DagResult<()> {
+        if self.adaptive_wait_released.contains(&round) {
+            self.tx_proposer
+                .send((parents, round))
+                .await
+                .expect("Failed to send certificate");
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        let mut state = self
+            .adaptive_wait_rounds
+            .remove(&round)
+            .unwrap_or(AdaptiveWaitState {
+                proposal_parents: ProposalParents::default(),
+                waiting_vertices: HashMap::new(),
+                deadline: now + self.adaptive_wait_delay,
+            });
+        let mut observed_progress = Self::merge_proposal_parents(&mut state.proposal_parents, parents);
+        if self.rebuild_waiting_vertices(round, &mut state) {
+            observed_progress = true;
+        }
+        if observed_progress {
+            state.deadline = now + self.adaptive_wait_delay;
+        }
+        self.adaptive_wait_rounds.insert(round, state);
+        Ok(())
+    }
+
+    fn next_adaptive_wait_deadline(&self) -> Option<Instant> {
+        self.adaptive_wait_rounds
+            .values()
+            .map(|state| state.deadline)
+            .min()
+    }
+
+    async fn flush_ready_adaptive_wait_rounds(&mut self) {
+        let now = Instant::now();
+        let ready_rounds: Vec<_> = self
+            .adaptive_wait_rounds
+            .iter()
+            .filter_map(|(round, state)| (state.deadline <= now).then_some(*round))
+            .collect();
+
+        for round in ready_rounds {
+            if let Some(state) = self.adaptive_wait_rounds.remove(&round) {
+                self.adaptive_wait_released.insert(round);
+                self.tx_proposer
+                    .send((state.proposal_parents, round))
+                    .await
+                    .expect("Failed to send certificate");
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -113,6 +373,10 @@ impl Core {
                 pending_headers: HashMap::with_capacity(2 * gc_depth as usize),
                 votes_aggregators: HashMap::with_capacity(2 * gc_depth as usize),
                 certificates_aggregators: HashMap::with_capacity(2 * gc_depth as usize),
+                vertex_round_states: HashMap::with_capacity(2 * gc_depth as usize),
+                adaptive_wait_rounds: HashMap::with_capacity(2 * gc_depth as usize),
+                adaptive_wait_released: HashSet::with_capacity(2 * gc_depth as usize),
+                adaptive_wait_delay: Duration::from_millis(20),
                 network: ReliableSender::new(),
                 cancel_handlers: HashMap::with_capacity(2 * gc_depth as usize),
             }
@@ -251,6 +515,10 @@ impl Core {
         // Store the header.
         let bytes = bincode::serialize(header).expect("Failed to serialize header");
         self.store.write(header.id.to_vec(), bytes).await;
+        let header_progress = self.record_processed_header(header);
+        if header_progress {
+            self.track_adaptive_wait_progress(header.round);
+        }
 
         // Check if we can vote for this header.
         let already_voted = self
@@ -277,25 +545,26 @@ impl Core {
                 "Created vote {:?} for header {} (round {})",
                 vote, header.id, header.round
             );
-            if vote.origin == self.name {
+            debug!(
+                "Processing local prepare-vote for header {} (round {}) before broadcast",
+                header.id, header.round
+            );
+            self.process_vote(vote.clone())
+                .await
+                .expect("Failed to process our own vote");
+
+            let addresses: Vec<_> = self
+                .committee
+                .others_primaries(&self.name)
+                .iter()
+                .map(|(_, x)| x.primary_to_primary)
+                .collect();
+            let bytes = bincode::serialize(&PrimaryMessage::Vote(vote))
+                .expect("Failed to serialize our own vote");
+            for address in addresses {
+                let handler = self.network.send(address, Bytes::from(bytes.clone())).await;
                 debug!(
-                    "Processing own vote for header {} (round {}) locally",
-                    header.id, header.round
-                );
-                self.process_vote(vote)
-                    .await
-                    .expect("Failed to process our own vote");
-            } else {
-                let address = self
-                    .committee
-                    .primary(&header.author)
-                    .expect("Author of valid header is not in the committee")
-                    .primary_to_primary;
-                let bytes = bincode::serialize(&PrimaryMessage::Vote(vote))
-                    .expect("Failed to serialize our own vote");
-                let handler = self.network.send(address, Bytes::from(bytes)).await;
-                debug!(
-                    "Forwarding vote for header {} (round {}) to primary at {}",
+                    "Broadcasting vote for header {} (round {}) to primary at {}",
                     header.id, header.round, address
                 );
                 self.cancel_handlers
@@ -311,6 +580,11 @@ impl Core {
     async fn process_vote(&mut self, vote: Vote) -> DagResult<()> {
         debug!("Processing {:?}", vote);
         let vote_id = vote.id.clone();
+        let round = vote.round;
+        let vote_progress = self.record_prepare_vote(&vote);
+        if vote_progress {
+            self.track_adaptive_wait_progress(round);
+        }
 
         let header = match self.pending_headers.get(&vote_id) {
             Some(header) => header.clone(),
@@ -436,6 +710,10 @@ impl Core {
         // Store the certificate.
         let bytes = bincode::serialize(&certificate).expect("Failed to serialize certificate");
         self.store.write(certificate.digest().to_vec(), bytes).await;
+        let certificate_progress = self.record_certificate_delivery(&certificate);
+        if certificate_progress {
+            self.track_adaptive_wait_progress(certificate.round());
+        }
 
         // Aggregate certificates by their own round instead of a single global current_round.
         // Whichever round reaches the unlock condition first can be dispatched to proposer first.
@@ -448,11 +726,7 @@ impl Core {
                 .or_insert_with(|| Box::new(CertificatesAggregator::new(target_round)))
                 .append(certificate.clone(), &self.committee)?
             {
-                // Send it to the `Proposer`.
-                self.tx_proposer
-                    .send((parents, target_round))
-                    .await
-                    .expect("Failed to send certificate");
+                self.update_adaptive_wait_round(target_round, parents).await?;
             }
         }
 
@@ -539,7 +813,7 @@ impl Core {
         // );
 
         // // Verify the vote.
-        vote.verify(&self.committee).map_err(DagError::from);
+        vote.verify(&self.committee).map_err(DagError::from)?;
         Ok(())
     }
 
@@ -555,7 +829,15 @@ impl Core {
 
     // Main loop listening to incoming messages.
     pub async fn run(&mut self) {
+        let fallback_deadline = Instant::now() + Duration::from_secs(24 * 60 * 60);
+        let timer = sleep_until(fallback_deadline);
+        tokio::pin!(timer);
+
         loop {
+            let next_deadline = self
+                .next_adaptive_wait_deadline()
+                .unwrap_or_else(|| Instant::now() + Duration::from_secs(24 * 60 * 60));
+            timer.as_mut().reset(next_deadline);
             let result = tokio::select! {
                 // We receive here messages from other primaries.
                 Some(message) = self.rx_primaries.recv() => {
@@ -659,6 +941,11 @@ impl Core {
 
                 // We also receive here our new headers created by the `Proposer`.
                 Some(header) = self.rx_proposer.recv() => self.process_own_header(header).await,
+
+                () = &mut timer => {
+                    self.flush_ready_adaptive_wait_rounds().await;
+                    Ok(())
+                }
             };
             match result {
                 Ok(()) => (),
@@ -669,6 +956,7 @@ impl Core {
                 Err(e @ DagError::TooOld(..)) => debug!("{}", e),
                 Err(e) => warn!("{}", e),
             }
+            self.flush_ready_adaptive_wait_rounds().await;
 
             // Cleanup internal state.
             let round = self.consensus_round.load(Ordering::Relaxed);
@@ -677,6 +965,9 @@ impl Core {
                 self.last_voted.retain(|k, _| k >= &gc_round);
                 self.processing.retain(|k, _| k >= &gc_round);
                 self.certificates_aggregators.retain(|k, _| k >= &gc_round);
+                self.vertex_round_states.retain(|k, _| k >= &gc_round);
+                self.adaptive_wait_rounds.retain(|k, _| k >= &gc_round);
+                self.adaptive_wait_released.retain(|k| *k >= gc_round);
                 self.cancel_handlers.retain(|k, _| k >= &gc_round);
                 self.pending_headers.retain(|_, h| h.round >= gc_round);
                 let active_header_ids: HashSet<Digest> =

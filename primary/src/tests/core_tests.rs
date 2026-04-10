@@ -343,7 +343,7 @@ async fn process_certificates() {
 
     // Ensure the core sends the parents of the certificates to the proposer.
     let received = rx_parents.recv().await.unwrap();
-    let parents = certificates.iter().map(|x| x.digest()).collect();
+    let parents = ProposalParents::from(certificates.iter().map(|x| x.digest()).collect::<Vec<_>>());
     assert_eq!(received, (parents, 1));
 
     // Ensure the core sends the certificates to the consensus.
@@ -358,4 +358,86 @@ async fn process_certificates() {
         let serialized = bincode::serialize(x).unwrap();
         assert_eq!(stored, Some(serialized));
     }
+}
+
+#[tokio::test]
+async fn adaptive_wait_absorbs_late_certificate() {
+    let (name, secret) = keys().pop().unwrap();
+    let signature_service = SignatureService::new(secret);
+
+    let (tx_sync_headers, _rx_sync_headers) = channel(1);
+    let (tx_sync_certificates, _rx_sync_certificates) = channel(1);
+    let (tx_primary_messages, rx_primary_messages) = channel(4);
+    let (_tx_headers_loopback, rx_headers_loopback) = channel(1);
+    let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
+    let (_tx_headers, rx_headers) = channel(1);
+    let (tx_consensus, _rx_consensus) = channel(4);
+    let (tx_parents, mut rx_parents) = channel(2);
+
+    let path = ".db_test_adaptive_wait_absorbs_late_certificate";
+    let _ = fs::remove_dir_all(path);
+    let store = Store::new(path).unwrap();
+
+    let synchronizer = Synchronizer::new(
+        name,
+        &committee(),
+        store.clone(),
+        tx_sync_headers,
+        tx_sync_certificates,
+    );
+
+    Core::spawn(
+        name,
+        committee(),
+        store,
+        synchronizer,
+        signature_service,
+        Arc::new(AtomicU64::new(0)),
+        50,
+        rx_primary_messages,
+        rx_headers_loopback,
+        rx_certificates_loopback,
+        rx_headers,
+        tx_consensus,
+        tx_parents,
+    );
+
+    let certificates: Vec<_> = headers()
+        .iter()
+        .take(4)
+        .map(|header| certificate(header))
+        .collect();
+
+    tx_primary_messages
+        .send(PrimaryMessage::Certificate(certificates[0].clone()))
+        .await
+        .unwrap();
+    tx_primary_messages
+        .send(PrimaryMessage::Certificate(certificates[1].clone()))
+        .await
+        .unwrap();
+    tx_primary_messages
+        .send(PrimaryMessage::Certificate(certificates[2].clone()))
+        .await
+        .unwrap();
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+
+    tx_primary_messages
+        .send(PrimaryMessage::Certificate(certificates[3].clone()))
+        .await
+        .unwrap();
+
+    let received = tokio::time::timeout(
+        tokio::time::Duration::from_millis(200),
+        rx_parents.recv(),
+    )
+    .await
+    .expect("adaptive wait did not release in time")
+    .unwrap();
+
+    let received_parents: HashSet<_> = received.0.parents.into_iter().collect();
+    let expected_parents: HashSet<_> = certificates.iter().map(|x| x.digest()).collect();
+    assert_eq!(received.1, 1);
+    assert_eq!(received_parents, expected_parents);
 }

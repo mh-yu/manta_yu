@@ -63,6 +63,10 @@ pub fn committee() -> Committee {
                 )
             })
             .collect(),
+        sigma: 10,
+        kappa: 1,
+        reference: 3,
+        coverage: 3,
     }
 }
 
