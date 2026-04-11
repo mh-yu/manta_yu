@@ -6,6 +6,7 @@ from benchmark.logs import ParseError, LogParser
 from benchmark.utils import Print, PathMaker
 from benchmark.cloudlab_instance import CloudLabInstanceManager
 from benchmark.cloudlab_remote import CloudLabBench
+from benchmark.cloudlab_wan import CloudLabWan
 from benchmark.utils import BenchError
 
 def _coerce_bool(value):
@@ -245,6 +246,20 @@ def cloudlab_install(ctx):
     except BenchError as e:
         Print.error(e)
 
+@task
+def cloudlab_wan(ctx, action='setup', settings_file='cloudlab_settings.json'):
+    ''' Emulate WAN RTT between sites (tc netem). action=setup|clear. Optional settings_file=... '''
+    try:
+        w = CloudLabWan(settings_file=settings_file)
+        act = (action or 'setup').lower()
+        if act == 'setup':
+            w.setup()
+        elif act == 'clear':
+            w.clear()
+        else:
+            Print.error('cloudlab_wan: use action=setup or action=clear')
+    except BenchError as e:
+        Print.error(e)
 
 @task
 def cloudlab_remote(
@@ -286,8 +301,8 @@ def cloudlab_remote(
 
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
     design_tag='manta_final_ablation',
-    network_tag='geo631',
-    load_tag='balanced_80_35',
+    network_tag='geo55',
+    load_tag='balanced_50_50',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
@@ -302,7 +317,7 @@ def cloudlab_remote(
         'collocate': True,
         'rate_type': 'balanced',
         # 'rate': [20000,40000,60000,80000,100000,120000,140000],
-        'rate': [20000],
+        'rate': [40000],
         # 'rate': [40000,80000,100000,120000,140000,150000,160000,180000],
         # 'rate': [130000],
         'tx_size': 512,
@@ -317,12 +332,12 @@ def cloudlab_remote(
     # 'max_batch_delay': 35,  # ms
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 80,  # ms
+        'max_header_delay': 50,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
         'batch_size': 500_000,  # bytes
-        'max_batch_delay': 35,  # ms
+        'max_batch_delay': 50,  # ms
         'sigma': sigma,
         'kappa': kappa,
         'reference': reference,

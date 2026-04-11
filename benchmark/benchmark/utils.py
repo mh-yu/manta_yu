@@ -237,7 +237,14 @@ class PathMaker:
         load_tag=None,
     ):
         safe_label = PathMaker._sanitize_label(label)
-        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+        
+        # Check if custom folder prefix is provided via environment variable
+        custom_prefix = os.environ.get('MANTA_FOLDER_PREFIX')
+        if custom_prefix:
+            timestamp = PathMaker._sanitize_label(custom_prefix)
+        else:
+            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+        
         base_dir = PathMaker.tagged_results_path(
             design_tag=design_tag,
             network_tag=network_tag,
