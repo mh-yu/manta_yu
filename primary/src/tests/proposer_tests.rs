@@ -44,7 +44,7 @@ async fn propose_payload() {
     let (name, secret) = keys().pop().unwrap();
     let signature_service = SignatureService::new(secret);
 
-    let (_tx_parents, rx_parents) = channel(1);
+    let (tx_parents, rx_parents) = channel(1);
     let (tx_our_digests, rx_our_digests) = channel(1);
     let (tx_headers, mut rx_headers) = channel(1);
 
@@ -74,9 +74,20 @@ async fn propose_payload() {
         .await
         .unwrap();
 
-    // Ensure the proposer makes a correct header from the provided payload.
+    // Round 1 is still a bootstrap header without payload.
     let header = rx_headers.recv().await.unwrap();
     assert_eq!(header.round, 1);
+    assert!(header.payload.is_empty());
+    assert!(header.verify(&committee()).is_ok());
+
+    // Unlock round 2 and ensure the payload is included there.
+    tx_parents
+        .send((ProposalParents::from(vec![Digest::default()]), 1))
+        .await
+        .unwrap();
+
+    let header = rx_headers.recv().await.unwrap();
+    assert_eq!(header.round, 2);
     assert_eq!(header.payload.get(&digest), Some(&worker_id));
     assert!(header.verify(&committee()).is_ok());
 }

@@ -1,7 +1,7 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::error::{DagError, DagResult};
 use crate::messages::Header;
-use crate::primary::{PrimaryMessage, PrimaryWorkerMessage, Round};
+use crate::primary::{PrimaryWorkerMessage, Round};
 use bytes::Bytes;
 use config::{Committee, WorkerId};
 use crypto::{Digest, PublicKey};
@@ -13,10 +13,9 @@ use network::SimpleSender;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{sleep, Duration};
 
 /// The resolution of the timer that checks whether we received replies to our sync requests, and triggers
 /// new sync requests if we didn't.
@@ -41,21 +40,13 @@ pub struct HeaderWaiter {
     consensus_round: Arc<AtomicU64>,
     /// The depth of the garbage collector.
     gc_depth: Round,
-    /// The delay to wait before re-trying sync requests.
-    sync_retry_delay: u64,
-    /// Determine with how many nodes to sync when re-trying to send sync-request.
-    sync_retry_nodes: usize,
-
     /// Receives sync commands from the `Synchronizer`.
     rx_synchronizer: Receiver<WaiterMessage>,
     /// Loops back to the core headers for which we got all parents and batches.
     tx_core: Sender<Header>,
-
-    /// Network driver allowing to send messages.
+    /// Network driver allowing to send batch sync messages to workers.
     network: SimpleSender,
-    /// Keeps the digests of the all certificates for which we sent a sync request,
-    /// along with a timestamp (`u128`) indicating when we sent the request.
-    parent_requests: HashMap<Digest, (Round, u128)>,
+
     /// Keeps the digests of the all tx batches for which we sent a sync request,
     /// similarly to `header_requests`.
     batch_requests: HashMap<Digest, Round>,
@@ -72,8 +63,8 @@ impl HeaderWaiter {
         store: Store,
         consensus_round: Arc<AtomicU64>,
         gc_depth: Round,
-        sync_retry_delay: u64,
-        sync_retry_nodes: usize,
+        _sync_retry_delay: u64,
+        _sync_retry_nodes: usize,
         rx_synchronizer: Receiver<WaiterMessage>,
         tx_core: Sender<Header>,
     ) {
@@ -84,12 +75,9 @@ impl HeaderWaiter {
                 store,
                 consensus_round,
                 gc_depth,
-                sync_retry_delay,
-                sync_retry_nodes,
                 rx_synchronizer,
                 tx_core,
                 network: SimpleSender::new(),
-                parent_requests: HashMap::new(),
                 batch_requests: HashMap::new(),
                 pending: HashMap::new(),
             }
@@ -222,29 +210,6 @@ impl HeaderWaiter {
                             let fut = Self::waiter(wait_for, header, rx_cancel);
                             waiting.push(fut);
 
-                            // Ensure we didn't already sent a sync request for these parents.
-                            // Optimistically send the sync request to the node that created the certificate.
-                            // If this fails (after a timeout), we broadcast the sync request.
-                            let now = SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .expect("Failed to measure time")
-                                .as_millis();
-                            let mut requires_sync = Vec::new();
-                            for missing in missing {
-                                self.parent_requests.entry(missing.clone()).or_insert_with(|| {
-                                    requires_sync.push(missing);
-                                    (round, now)
-                                });
-                            }
-                            if !requires_sync.is_empty() {
-                                let address = self.committee
-                                    .primary(&author)
-                                    .expect("Author of valid header not in the committee")
-                                    .primary_to_primary;
-                                let message = PrimaryMessage::CertificatesRequest(requires_sync, self.name);
-                                let bytes = bincode::serialize(&message).expect("Failed to serialize cert request");
-                                self.network.send(address, Bytes::from(bytes)).await;
-                            }
                         }
                     }
                 },
@@ -260,9 +225,6 @@ impl HeaderWaiter {
                         for x in header.payload.keys() {
                             let _ = self.batch_requests.remove(x);
                         }
-                        for x in &header.parents {
-                            let _ = self.parent_requests.remove(x);
-                        }
                         self.tx_core.send(header).await.expect("Failed to send header");
                     },
                     Ok(None) => {
@@ -275,33 +237,8 @@ impl HeaderWaiter {
                 },
 
                 () = &mut timer => {
-                    // We optimistically sent sync requests to a single node. If this timer triggers,
-                    // it means we were wrong to trust it. We are done waiting for a reply and we now
-                    // broadcast the request to all nodes.
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Failed to measure time")
-                        .as_millis();
-
-                    let mut retry = Vec::new();
-                    for (digest, (_, timestamp)) in &self.parent_requests {
-                        if timestamp + (self.sync_retry_delay as u128) < now {
-                            debug!("Requesting sync for certificate {} (retry)", digest);
-                            retry.push(digest.clone());
-                        }
-                    }
-
-                    let addresses = self.committee
-                        .others_primaries(&self.name)
-                        .iter()
-                        .map(|(_, x)| x.primary_to_primary)
-                        .collect();
-                    let message = PrimaryMessage::CertificatesRequest(retry, self.name);
-                    let bytes = bincode::serialize(&message).expect("Failed to serialize cert request");
-                    self.network.lucky_broadcast(addresses, Bytes::from(bytes), self.sync_retry_nodes).await;
-
                     // Reschedule the timer.
-                    timer.as_mut().reset(Instant::now() + Duration::from_millis(TIMER_RESOLUTION));
+                    timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(TIMER_RESOLUTION));
                 }
             }
 
@@ -329,7 +266,6 @@ impl HeaderWaiter {
                 }
                 self.pending.retain(|_, (r, _)| r > &mut gc_round);
                 self.batch_requests.retain(|_, r| r > &mut gc_round);
-                self.parent_requests.retain(|_, (r, _)| r > &mut gc_round);
             }
         }
     }

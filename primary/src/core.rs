@@ -383,43 +383,6 @@ impl Core {
         changed
     }
 
-    async fn broadcast_certificate(&mut self, certificate: &Certificate) {
-        let cert_id = certificate.header.id.clone();
-        let cert_round = certificate.round();
-        debug!(
-            "Broadcasting certificate {} (round {}) to other primaries",
-            cert_id, cert_round
-        );
-        let addresses: Vec<_> = self
-            .committee
-            .others_primaries(&self.name)
-            .iter()
-            .map(|(_, x)| x.primary_to_primary)
-            .collect();
-        let bytes = bincode::serialize(&PrimaryMessage::Certificate(certificate.clone()))
-            .expect("Failed to serialize our own certificate");
-        for address in addresses {
-            let handler = self.network.send(address, Bytes::from(bytes.clone())).await;
-            let id = cert_id.clone();
-            tokio::spawn(async move {
-                match handler.await {
-                    Ok(_) => {
-                        debug!(
-                            "Certificate {} (round {}) successfully delivered to primary {}",
-                            id, cert_round, address
-                        );
-                    }
-                    Err(_) => {
-                        debug!(
-                            "Certificate {} (round {}) delivery to primary {} was canceled or failed",
-                            id, cert_round, address
-                        );
-                    }
-                }
-            });
-        }
-    }
-
     async fn update_adaptive_wait_round(
         &mut self,
         round: Round,
@@ -953,8 +916,6 @@ impl Core {
                 header.round
             );
 
-            self.broadcast_certificate(&certificate).await;
-
             // Process the new certificate.
             self.process_certificate(certificate)
                 .await
@@ -1177,23 +1138,12 @@ impl Core {
                                 .node_index(&origin)
                                 .map_or_else(|| "unknown".to_string(), |idx| idx.to_string());
                             debug!(
-                                "Channel recv certificate {} (origin Node{}, round {})",
+                                "Ignoring remotely received certificate {} (origin Node{}, round {}): certificates no longer propagate across primaries",
                                 certificate.header.id,
                                 origin_node,
                                 certificate.round()
                             );
-                            match self.sanitize_certificate(&certificate) {
-                                Ok(()) =>  self.process_certificate(certificate).await,
-                                Err(e) => {
-                                    debug!(
-                                        "Discarding certificate {} (round {}) in sanitize_certificate: {}",
-                                        certificate.header.id,
-                                        certificate.round(),
-                                        e
-                                    );
-                                    Err(e)
-                                }
-                            }
+                            Ok(())
                         },
                         _ => panic!("Unexpected core message")
                     }
