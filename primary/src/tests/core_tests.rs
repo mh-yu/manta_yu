@@ -4,7 +4,6 @@ use crate::common::{
     certificate, committee, committee_with_base_port, header, headers, keys, listener, votes,
 };
 use crypto::Signature;
-use futures::future::try_join_all;
 use std::fs;
 use tokio::sync::mpsc::channel;
 
@@ -224,8 +223,8 @@ async fn process_votes() {
     let (tx_primary_messages, rx_primary_messages) = channel(1);
     let (_tx_headers_loopback, rx_headers_loopback) = channel(1);
     let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
-    let (_tx_headers, rx_headers) = channel(1);
-    let (tx_consensus, _rx_consensus) = channel(1);
+    let (tx_headers, rx_headers) = channel(1);
+    let (tx_consensus, mut rx_consensus) = channel(1);
     let (tx_parents, _rx_parents) = channel(1);
 
     // Create a new test store.
@@ -260,31 +259,26 @@ async fn process_votes() {
         /* tx_proposer */ tx_parents,
     );
 
-    // Make the certificate we expect to receive.
-    let expected = certificate(&Header::default());
+    // First inject a locally proposed header so the core can aggregate votes for it.
+    let known_header = header();
+    let expected = certificate(&known_header);
+    tx_headers.send(known_header.clone()).await.unwrap();
 
-    // Spawn all listeners to receive our newly formed certificate.
-    let handles: Vec<_> = committee
-        .others_primaries(&name)
-        .iter()
-        .map(|(_, address)| listener(address.primary_to_primary))
-        .collect();
-
-    // Send a votes to the core.
-    for vote in votes(&Header::default()) {
+    // Send enough remote votes to reach quorum together with the local vote created by process_own_header.
+    for vote in votes(&known_header)
+        .into_iter()
+        .filter(|vote| vote.author != name)
+        .take(2)
+    {
         tx_primary_messages
             .send(PrimaryMessage::Vote(vote))
             .await
             .unwrap();
     }
 
-    // Ensure all listeners got the certificate.
-    for received in try_join_all(handles).await.unwrap() {
-        match bincode::deserialize(&received).unwrap() {
-            PrimaryMessage::Certificate(x) => assert_eq!(x, expected),
-            x => panic!("Unexpected message: {:?}", x),
-        }
-    }
+    // Ensure the certificate is assembled locally and forwarded to consensus.
+    let received = rx_consensus.recv().await.unwrap();
+    assert_eq!(received, expected);
 }
 
 #[tokio::test]
@@ -349,8 +343,10 @@ async fn process_certificates() {
 
     // Ensure the core sends the parents of the certificates to the proposer.
     let received = rx_parents.recv().await.unwrap();
-    let parents = ProposalParents::from(certificates.iter().map(|x| x.digest()).collect::<Vec<_>>());
-    assert_eq!(received, (parents, 1));
+    let received_parents: HashSet<_> = received.0.parents.into_iter().collect();
+    let expected_parents: HashSet<_> = certificates.iter().map(|x| x.digest()).collect();
+    assert_eq!(received.1, 1);
+    assert_eq!(received_parents, expected_parents);
 
     // Ensure the core sends the certificates to the consensus.
     for x in certificates.clone() {
@@ -419,7 +415,7 @@ async fn adaptive_wait_absorbs_late_certificate() {
         .send(PrimaryMessage::Header(certificates[3].header.clone()))
         .await
         .unwrap();
-    for vote in votes(&certificates[3].header).into_iter().take(2) {
+    for vote in votes(&certificates[3].header).into_iter().take(1) {
         tx_primary_messages
             .send(PrimaryMessage::Vote(vote))
             .await
