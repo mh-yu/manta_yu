@@ -222,12 +222,10 @@ class LogParser:
             start, end = min(self.proposals.values()), max(self.commits.values())
             bytes = sum(self.sizes.values())
         else:
-            committed_headers = [
-                key for key in self.header_commits if key in self.header_sizes
-            ]
-            if not committed_headers or not self.header_proposals:
+            committed_headers = self._committed_payload_headers()
+            if not committed_headers:
                 return 0, 0, 0
-            start = min(self.header_proposals.values())
+            start = min(self.header_proposals[key] for key in committed_headers if key in self.header_proposals)
             end = max(self.header_commits[key] for key in committed_headers)
             bytes = sum(self.header_sizes[key] for key in committed_headers)
 
@@ -242,7 +240,7 @@ class LogParser:
             latency = [
                 c - self.header_proposals[k]
                 for k, c in self.header_commits.items()
-                if k in self.header_proposals
+                if k in self.header_proposals and self.header_sizes.get(k, 0) > 0
             ]
         return mean(latency) if latency else 0
 
@@ -256,12 +254,14 @@ class LogParser:
             end = max(self.commits.values())
             bytes = sum(self.sizes.values())
         else:
-            committed_headers = [
-                key for key in self.header_commits if key in self.header_sizes
-            ]
+            committed_headers = self._committed_payload_headers()
             if not committed_headers:
                 return 0, 0, 0
-            fallback_start = min(self.header_proposals.values()) if self.header_proposals else None
+            fallback_start = min(
+                self.header_proposals[key]
+                for key in committed_headers
+                if key in self.header_proposals
+            )
             start = min(start_candidates) if start_candidates else fallback_start
             if start is None:
                 return 0, 0, 0
@@ -283,6 +283,12 @@ class LogParser:
                     end = self.commits[batch_id]
                     latency += [end-start]
         return mean(latency) if latency else 0
+
+    def _committed_payload_headers(self):
+        return [
+            key for key in self.header_commits
+            if key in self.header_sizes and self.header_sizes[key] > 0 and key in self.header_proposals
+        ]
 
     def _execution_duration(self):
         start_candidates = [x for x in self.start if x is not None]

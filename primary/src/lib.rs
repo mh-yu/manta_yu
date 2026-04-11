@@ -6,7 +6,6 @@ mod certificate_waiter;
 mod core;
 mod garbage_collector;
 mod header_waiter;
-mod helper;
 mod messages;
 mod primary;
 mod proposer;

@@ -81,7 +81,7 @@ pub struct Core {
     rx_primaries: Receiver<PrimaryMessage>,
     /// Receives loopback headers from the `HeaderWaiter`.
     rx_header_waiter: Receiver<Header>,
-    /// Receives loopback certificates from the `CertificateWaiter`.
+    /// Receives locally assembled certificates looped back by the `CertificateWaiter`.
     rx_certificate_waiter: Receiver<Certificate>,
     /// Receives our newly created headers from the `Proposer`.
     rx_proposer: Receiver<Header>,
@@ -381,43 +381,6 @@ impl Core {
             self.adaptive_wait_rounds.insert(round, state);
         }
         changed
-    }
-
-    async fn broadcast_certificate(&mut self, certificate: &Certificate) {
-        let cert_id = certificate.header.id.clone();
-        let cert_round = certificate.round();
-        debug!(
-            "Broadcasting certificate {} (round {}) to other primaries",
-            cert_id, cert_round
-        );
-        let addresses: Vec<_> = self
-            .committee
-            .others_primaries(&self.name)
-            .iter()
-            .map(|(_, x)| x.primary_to_primary)
-            .collect();
-        let bytes = bincode::serialize(&PrimaryMessage::Certificate(certificate.clone()))
-            .expect("Failed to serialize our own certificate");
-        for address in addresses {
-            let handler = self.network.send(address, Bytes::from(bytes.clone())).await;
-            let id = cert_id.clone();
-            tokio::spawn(async move {
-                match handler.await {
-                    Ok(_) => {
-                        debug!(
-                            "Certificate {} (round {}) successfully delivered to primary {}",
-                            id, cert_round, address
-                        );
-                    }
-                    Err(_) => {
-                        debug!(
-                            "Certificate {} (round {}) delivery to primary {} was canceled or failed",
-                            id, cert_round, address
-                        );
-                    }
-                }
-            });
-        }
     }
 
     async fn update_adaptive_wait_round(
@@ -953,8 +916,6 @@ impl Core {
                 header.round
             );
 
-            self.broadcast_certificate(&certificate).await;
-
             // Process the new certificate.
             self.process_certificate(certificate)
                 .await
@@ -990,11 +951,11 @@ impl Core {
             self.process_header(&certificate.header).await?;
         }
 
-        // Ensure we have all the ancestors of this certificate yet. If we don't, the synchronizer will gather
-        // them and trigger re-processing of this certificate.
+        // Ensure we have all the ancestors of this certificate yet. If we don't, the local
+        // certificate waiter will trigger re-processing once those parent certificates land in storage.
         if !self.synchronizer.deliver_certificate(&certificate).await? {
             debug!(
-                "Certificate {} (round {}) suspended in synchronizer: missing ancestor certificates, will be retried by CertificateWaiter",
+                "Certificate {} (round {}) suspended locally: missing ancestor certificates, will be retried by CertificateWaiter",
                 certificate.header.id,
                 certificate.round()
             );
@@ -1117,16 +1078,6 @@ impl Core {
         Ok(())
     }
 
-    fn sanitize_certificate(&mut self, certificate: &Certificate) -> DagResult<()> {
-        ensure!(
-            self.gc_round <= certificate.round(),
-            DagError::TooOld(certificate.digest(), certificate.round())
-        );
-
-        // Verify the certificate (and the embedded header).
-        certificate.verify(&self.committee).map_err(DagError::from)
-    }
-
     // Main loop listening to incoming messages.
     pub async fn run(&mut self) {
         loop {
@@ -1171,31 +1122,6 @@ impl Core {
                                 }
                             }
                         },
-                        PrimaryMessage::Certificate(certificate) => {
-                            let origin = certificate.origin();
-                            let origin_node = self
-                                .node_index(&origin)
-                                .map_or_else(|| "unknown".to_string(), |idx| idx.to_string());
-                            debug!(
-                                "Channel recv certificate {} (origin Node{}, round {})",
-                                certificate.header.id,
-                                origin_node,
-                                certificate.round()
-                            );
-                            match self.sanitize_certificate(&certificate) {
-                                Ok(()) =>  self.process_certificate(certificate).await,
-                                Err(e) => {
-                                    debug!(
-                                        "Discarding certificate {} (round {}) in sanitize_certificate: {}",
-                                        certificate.header.id,
-                                        certificate.round(),
-                                        e
-                                    );
-                                    Err(e)
-                                }
-                            }
-                        },
-                        _ => panic!("Unexpected core message")
                     }
                 },
 
@@ -1214,9 +1140,8 @@ impl Core {
                     self.process_header(&header).await
                 },
 
-                // We receive here loopback certificates from the `CertificateWaiter`. Those are certificates for which
-                // we interrupted execution (we were missing some of their ancestors) and we are now ready to resume
-                // processing.
+                // We receive here loopback certificates from the local `CertificateWaiter`. Those are certificates we
+                // assembled locally but could not yet deliver because some parent certificates were still missing.
                 Some(certificate) = self.rx_certificate_waiter.recv() => {
                     let origin = certificate.origin();
                     let origin_node = self

@@ -4,7 +4,6 @@ use crate::core::Core;
 use crate::error::DagError;
 use crate::garbage_collector::GarbageCollector;
 use crate::header_waiter::HeaderWaiter;
-use crate::helper::Helper;
 use crate::messages::{BatchPayload, Certificate, Header, Vote};
 use crate::proposer::Proposer;
 use crate::synchronizer::Synchronizer;
@@ -32,8 +31,6 @@ pub type Round = u64;
 pub enum PrimaryMessage {
     Header(Header),
     Vote(Vote),
-    Certificate(Certificate),
-    CertificatesRequest(Vec<Digest>, /* requestor */ PublicKey),
 }
 
 /// The messages sent by the primary to its workers.
@@ -73,7 +70,6 @@ impl Primary {
         let (tx_headers_loopback, rx_headers_loopback) = channel(CHANNEL_CAPACITY);
         let (tx_certificates_loopback, rx_certificates_loopback) = channel(CHANNEL_CAPACITY);
         let (tx_primary_messages, rx_primary_messages) = channel(CHANNEL_CAPACITY);
-        let (tx_cert_requests, rx_cert_requests) = channel(CHANNEL_CAPACITY);
 
         // Write the parameters to the logs.
         parameters.log();
@@ -95,10 +91,7 @@ impl Primary {
         NetworkReceiver::spawn(
             address,
             /* handler */
-            PrimaryReceiverHandler {
-                tx_primary_messages,
-                tx_cert_requests,
-            },
+            PrimaryReceiverHandler { tx_primary_messages },
         );
         info!(
             "Primary {} listening to primary messages on {}",
@@ -123,7 +116,7 @@ impl Primary {
             name, address
         );
 
-        // The `Synchronizer` provides auxiliary methods helping to `Core` to sync.
+        // The `Synchronizer` provides auxiliary methods helping `Core` wait for missing local data.
         let synchronizer = Synchronizer::new(
             name,
             &committee,
@@ -135,7 +128,7 @@ impl Primary {
         // The `SignatureService` is used to require signatures on specific digests.
         let signature_service = SignatureService::new(secret);
 
-        // The `Core` receives and handles headers, votes, and certificates from the other primaries.
+        // The `Core` receives and handles headers and votes from the other primaries.
         Core::spawn(
             name,
             committee.clone(),
@@ -156,17 +149,13 @@ impl Primary {
         // Keeps track of the latest consensus round and allows other tasks to clean up their their internal state
         GarbageCollector::spawn(&name, &committee, consensus_round.clone(), rx_consensus);
 
-        // Whenever the `Synchronizer` does not manage to validate a header due to missing parent certificates of
-        // batch digests, it commands the `HeaderWaiter` to synchronizer with other nodes, wait for their reply, and
-        // re-schedule execution of the header once we have all missing data.
+        // Whenever the `Synchronizer` does not manage to validate a header due to missing parent certificates,
+        // it commands the `HeaderWaiter` to wait until those parents are available locally and then re-schedule
+        // execution of the header.
         HeaderWaiter::spawn(
-            name,
-            committee.clone(),
             store.clone(),
             consensus_round,
             parameters.gc_depth,
-            parameters.sync_retry_delay,
-            parameters.sync_retry_nodes,
             /* rx_synchronizer */ rx_sync_headers,
             /* tx_core */ tx_headers_loopback,
         );
@@ -193,9 +182,6 @@ impl Primary {
             store.clone(),
         );
 
-        // The `Helper` is dedicated to reply to certificates requests from other primaries.
-        Helper::spawn(committee.clone(), store, rx_cert_requests);
-
         // NOTE: This log entry is used to compute performance.
         info!(
             "Primary {} successfully booted on {}",
@@ -213,7 +199,6 @@ impl Primary {
 #[derive(Clone)]
 struct PrimaryReceiverHandler {
     tx_primary_messages: Sender<PrimaryMessage>,
-    tx_cert_requests: Sender<(Vec<Digest>, PublicKey)>,
 }
 
 #[async_trait]
@@ -223,18 +208,11 @@ impl MessageHandler for PrimaryReceiverHandler {
         let _ = writer.send(Bytes::from("Ack")).await;
 
         // Deserialize and parse the message.
-        match bincode::deserialize(&serialized).map_err(DagError::SerializationError)? {
-            PrimaryMessage::CertificatesRequest(missing, requestor) => self
-                .tx_cert_requests
-                .send((missing, requestor))
-                .await
-                .expect("Failed to send primary message"),
-            request => self
-                .tx_primary_messages
-                .send(request)
-                .await
-                .expect("Failed to send certificate"),
-        }
+        let message = bincode::deserialize(&serialized).map_err(DagError::SerializationError)?;
+        self.tx_primary_messages
+            .send(message)
+            .await
+            .expect("Failed to forward primary message");
         Ok(())
     }
 }

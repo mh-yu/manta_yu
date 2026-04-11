@@ -12,8 +12,6 @@ use tokio::sync::mpsc::Sender;
 /// The `Synchronizer` checks if we have all batches and parents referenced by a header. If we don't, it sends
 /// a command to the `Waiter` to request the missing data.
 pub struct Synchronizer {
-    /// The public key of this primary.
-    name: PublicKey,
     /// Cached authority ordering to map to node ids in logs.
     authorities: Vec<PublicKey>,
     /// The persistent storage.
@@ -28,7 +26,7 @@ pub struct Synchronizer {
 
 impl Synchronizer {
     pub fn new(
-        name: PublicKey,
+        _name: PublicKey,
         committee: &Committee,
         store: Store,
         tx_header_waiter: Sender<WaiterMessage>,
@@ -36,7 +34,6 @@ impl Synchronizer {
     ) -> Self {
         let authorities = committee.authorities.keys().cloned().collect();
         Self {
-            name,
             authorities,
             store,
             tx_header_waiter,
@@ -79,8 +76,8 @@ impl Synchronizer {
     }
 
     /// Returns the parents of a header if we have them all. If at least one parent is missing,
-    /// we return an empty vector, synchronize with other nodes, and re-schedule processing
-    /// of the header for when we will have all the parents.
+    /// we return an empty vector and re-schedule processing of the header for when those
+    /// parent certificates become available locally.
     pub async fn get_parents(&mut self, header: &Header) -> DagResult<Vec<Certificate>> {
         let mut missing = Vec::new();
         let mut parents = Vec::new();
@@ -146,7 +143,8 @@ impl Synchronizer {
     }
 
     /// Check whether we have all the ancestors of the certificate. If we don't, send the certificate to
-    /// the `CertificateWaiter` which will trigger re-processing once we have all the missing data.
+    /// the local `CertificateWaiter`, which will trigger re-processing once the missing parent
+    /// certificates are available in storage.
     pub async fn deliver_certificate(&mut self, certificate: &Certificate) -> DagResult<bool> {
         for digest in &certificate.header.parents {
             if self.genesis.iter().any(|(x, _)| x == digest) {
