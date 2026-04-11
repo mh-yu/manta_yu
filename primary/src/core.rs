@@ -994,20 +994,20 @@ impl Core {
         if locally_assembled {
             self.votes_aggregators.remove(&certificate.header.id);
             self.buffered_votes.remove(&certificate.header.id);
+        }
 
-            // Aggregate certificates by their own round instead of a single global current_round.
-            // Whichever round reaches the unlock condition first can be dispatched to proposer first.
-            let target_round_start = certificate.round();
-            let target_round_end = target_round_start + self.committee.solid_wave_length();
-            for target_round in target_round_start..target_round_end {
-                if let Some(parents) = self
-                    .certificates_aggregators
-                    .entry(target_round)
-                    .or_insert_with(|| Box::new(CertificatesAggregator::new(target_round)))
-                    .append(certificate.clone(), &self.committee)?
-                {
-                    self.update_adaptive_wait_round(target_round, parents).await?;
-                }
+        // Any fully verified certificate available locally, whether assembled here or fetched on demand,
+        // can now unlock future parent sets.
+        let target_round_start = certificate.round();
+        let target_round_end = target_round_start + self.committee.solid_wave_length();
+        for target_round in target_round_start..target_round_end {
+            if let Some(parents) = self
+                .certificates_aggregators
+                .entry(target_round)
+                .or_insert_with(|| Box::new(CertificatesAggregator::new(target_round)))
+                .append(certificate.clone(), &self.committee)?
+            {
+                self.update_adaptive_wait_round(target_round, parents).await?;
             }
         }
 
