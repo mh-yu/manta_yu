@@ -7,6 +7,8 @@ use crypto::Hash as _;
 use log::info;
 #[cfg(feature = "benchmark")]
 use primary::BatchPayload;
+#[cfg(feature = "benchmark")]
+use std::convert::TryInto;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{sleep, Duration, Instant};
 

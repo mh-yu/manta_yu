@@ -1548,11 +1548,13 @@ SCRIPTEOF'''
                     continue
 
                 client_rate = worker_rates[min(worker_index, len(worker_rates) - 1)]
+                client_id = i * bench_parameters.workers + id
                 cmd = CommandMaker.run_client(
                     address,
                     bench_parameters.tx_size,
                     client_rate,
-                    [x for y in workers_addresses for _, x in y]
+                    [x for y in workers_addresses for _, x in y],
+                    client_id=client_id,
                 )
                 log_file = PathMaker.client_log_file(i, id)
                 self._background_run(host_info, cmd, log_file)

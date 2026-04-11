@@ -261,7 +261,7 @@ def cloudlab_wan(ctx, action='setup', settings_file='cloudlab_settings.json'):
 
 
 @task
-def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2, enable_wait=True):
+def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3, enable_wait=True):
     ''' Run benchmarks on CloudLab '''
     bench_params = {
         'faults': 0,

@@ -5,6 +5,7 @@ from multiprocessing import Pool
 from os.path import join
 from re import findall, search
 from statistics import mean
+from collections import defaultdict
 
 from benchmark.utils import Print
 
@@ -64,6 +65,7 @@ class LogParser:
         (
             proposals,
             commits,
+            committed_samples,
             header_proposals,
             header_commits,
             header_sizes,
@@ -73,6 +75,7 @@ class LogParser:
         ) = zip(*results)
         self.proposals = self._merge_results([x.items() for x in proposals])
         self.commits = self._merge_results([x.items() for x in commits])
+        self.committed_samples = self._merge_results([x.items() for x in committed_samples])
         self.header_proposals = self._merge_results([x.items() for x in header_proposals])
         self.header_commits = self._merge_results([x.items() for x in header_commits])
         self.header_sizes = self._merge_results([x.items() for x in header_sizes])
@@ -121,10 +124,15 @@ class LogParser:
         misses = len(findall(r'rate too high', log))
 
         tmp = findall(r'\[+([^\] \[]+) [^\]]*\] Sending sample transaction (\d+)', log)
-        samples = {int(s): self._to_posix(t) for t, s in tmp}
-        end = max(samples.values()) if samples else self._last_timestamp(log)
+        samples = defaultdict(list)
+        for t, s in tmp:
+            samples[int(s)].append(self._to_posix(t))
+        if samples:
+            end = max(max(times) for times in samples.values())
+        else:
+            end = self._last_timestamp(log)
 
-        return size, rate, start, end, misses, samples
+        return size, rate, start, end, misses, dict(samples)
 
     def _parse_primaries(self, log):
         if search(r'(?:panicked|Error)', log) is not None:
@@ -137,6 +145,13 @@ class LogParser:
         tmp = findall(r'\[+([^\] \[]+) [^\]]*\] Committed B\d+\([^ ]+\) -> ([^ ]+=)', log)
         tmp = [(d, self._to_posix(t)) for t, d in tmp]
         commits = self._merge_results([tmp])
+
+        tmp = findall(
+            r'\[+([^\] \[]+) [^\]]*\] Committed sample transaction (\d+)',
+            log,
+        )
+        tmp = [(int(sample_id), self._to_posix(t)) for t, sample_id in tmp]
+        committed_samples = self._merge_results([tmp])
 
         tmp = findall(
             r'\[+([^\] \[]+) [^\]]*\] VERTEX_SIZE round=(\d+) node=(\d+) header=[^ ]+ '
@@ -186,7 +201,17 @@ class LogParser:
 
         ip = search(r'booted on (\d+.\d+.\d+.\d+)', log).group(1)
         
-        return proposals, commits, header_proposals, header_commits, header_sizes, end, configs, ip
+        return (
+            proposals,
+            commits,
+            committed_samples,
+            header_proposals,
+            header_commits,
+            header_sizes,
+            end,
+            configs,
+            ip,
+        )
 
     def _parse_workers(self, log):
         if search(r'(?:panic|Error)', log) is not None:
@@ -196,12 +221,14 @@ class LogParser:
         sizes = {d: int(s) for d, s in tmp}
 
         tmp = findall(r'Batch ([^ ]+) contains sample tx (\d+)', log)
-        samples = {int(s): d for d, s in tmp}
+        samples = defaultdict(list)
+        for d, s in tmp:
+            samples[int(s)].append(d)
 
         ip = search(r'booted on (\d+.\d+.\d+.\d+)', log).group(1)
         end = self._last_timestamp(log)
 
-        return sizes, samples, ip, end
+        return sizes, dict(samples), ip, end
 
     def _to_posix(self, string):
         normalized = string.strip().lstrip('[').rstrip(']')
@@ -275,13 +302,43 @@ class LogParser:
 
     def _end_to_end_latency(self):
         latency = []
-        for sent, received in zip(self.sent_samples, self.received_samples):
-            for tx_id, batch_id in received.items():
-                if batch_id in self.commits:
-                    assert tx_id in sent  # We receive txs that we sent.
-                    start = sent[tx_id]
-                    end = self.commits[batch_id]
-                    latency += [end-start]
+        if self.committed_samples:
+            sent_samples = defaultdict(list)
+            for sent in self.sent_samples:
+                for tx_id, starts in sent.items():
+                    if isinstance(starts, list):
+                        sent_samples[tx_id].extend(starts)
+                    else:
+                        sent_samples[tx_id].append(starts)
+            for tx_id, end in self.committed_samples.items():
+                starts = sent_samples.get(tx_id, [])
+                if starts:
+                    latency.append(end - min(starts))
+            return mean(latency) if latency else 0
+
+        received_by_tx = defaultdict(list)
+        for received in self.received_samples:
+            for tx_id, batch_ids in received.items():
+                if isinstance(batch_ids, list):
+                    received_by_tx[tx_id].extend(batch_ids)
+                else:
+                    received_by_tx[tx_id].append(batch_ids)
+
+        sent_samples = defaultdict(list)
+        for sent in self.sent_samples:
+            for tx_id, starts in sent.items():
+                if isinstance(starts, list):
+                    sent_samples[tx_id].extend(starts)
+                else:
+                    sent_samples[tx_id].append(starts)
+
+        for tx_id, batch_ids in received_by_tx.items():
+            starts = sent_samples.get(tx_id, [])
+            if not starts:
+                continue
+            commit_times = [self.commits[batch_id] for batch_id in batch_ids if batch_id in self.commits]
+            if commit_times:
+                latency.append(min(commit_times) - min(starts))
         return mean(latency) if latency else 0
 
     def _committed_payload_headers(self):

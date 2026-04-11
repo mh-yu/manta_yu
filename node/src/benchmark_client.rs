@@ -21,6 +21,7 @@ async fn main() -> Result<()> {
         .args_from_usage("<ADDR> 'The network address of the node where to send txs'")
         .args_from_usage("--size=<INT> 'The size of each transaction in bytes'")
         .args_from_usage("--rate=<INT> 'The rate (txs/s) at which to send the transactions'")
+        .args_from_usage("--client-id=[INT] 'A unique identifier used to make benchmark sample ids global'")
         .args_from_usage("--nodes=[ADDR]... 'Network addresses that must be reachable before starting the benchmark.'")
         .setting(AppSettings::ArgRequiredElseHelp)
         .get_matches();
@@ -44,6 +45,11 @@ async fn main() -> Result<()> {
         .unwrap()
         .parse::<u64>()
         .context("The rate of transactions must be a non-negative integer")?;
+    let client_id = matches
+        .value_of("client-id")
+        .unwrap_or("0")
+        .parse::<u64>()
+        .context("The client id must be a non-negative integer")?;
     let nodes = matches
         .values_of("nodes")
         .unwrap_or_default()
@@ -64,6 +70,7 @@ async fn main() -> Result<()> {
         target,
         size,
         rate,
+        client_id,
         nodes,
     };
 
@@ -78,6 +85,7 @@ struct Client {
     target: SocketAddr,
     size: usize,
     rate: u64,
+    client_id: u64,
     nodes: Vec<SocketAddr>,
 }
 
@@ -116,11 +124,13 @@ impl Client {
 
             for x in 0..burst {
                 if x == counter % burst {
+                    let sample_id =
+                        ((self.client_id & 0xffff_ffff) << 32) | (counter & 0xffff_ffff);
                     // NOTE: This log entry is used to compute performance.
-                    info!("Sending sample transaction {}", counter);
+                    info!("Sending sample transaction {}", sample_id);
 
                     tx.put_u8(0u8); // Sample txs start with 0.
-                    tx.put_u64(counter); // This counter identifies the tx.
+                    tx.put_u64(sample_id); // This identifier is unique across clients.
                 } else {
                     r += 1;
                     tx.put_u8(1u8); // Standard txs start with 1.

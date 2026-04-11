@@ -114,11 +114,13 @@ class LocalBench:
                 for i, addresses in enumerate(workers_addresses):
                     for (id, address) in addresses:
                         client_rates.append(rate_share)
+                        client_id = i * self.workers + id
                         cmd = CommandMaker.run_client(
                             address,
                             self.tx_size,
                             rate_share,
-                            [x for y in workers_addresses for _, x in y]
+                            [x for y in workers_addresses for _, x in y],
+                            client_id=client_id,
                         )
                         log_file = PathMaker.client_log_file(i, id)
                         self._background_run(cmd, log_file)
@@ -131,11 +133,13 @@ class LocalBench:
                 for i, addresses in enumerate(workers_addresses):
                     for (id, address) in addresses:
                         client_rates.append(rates[i])
+                        client_id = i * self.workers + id
                         cmd = CommandMaker.run_client(
                             address,
                             self.tx_size,
                             rates[i],
-                            [x for y in workers_addresses for _, x in y]
+                            [x for y in workers_addresses for _, x in y],
+                            client_id=client_id,
                         )
                         log_file = PathMaker.client_log_file(i, id)
                         self._background_run(cmd, log_file)

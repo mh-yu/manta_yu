@@ -6,6 +6,7 @@ use log::{debug, info, warn};
 use primary::{Certificate, Round};
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 #[cfg(test)]
@@ -300,8 +301,19 @@ impl Consensus {
             info!("Committed {}", certificate.header);
 
             #[cfg(feature = "benchmark")]
-            for digest in certificate.header.payload.keys() {
-                info!("Committed {} -> {:?}", certificate.header, digest);
+            {
+                for digest in certificate.header.payload.keys() {
+                    info!("Committed {} -> {:?}", certificate.header, digest);
+                }
+                for payload in certificate.header.payload.values() {
+                    for tx in &payload.transactions {
+                        if tx.len() > 8 && tx[0] == 0u8 {
+                            let sample_id =
+                                u64::from_be_bytes(tx[1..9].try_into().expect("Invalid sample tx id"));
+                            info!("Committed sample transaction {}", sample_id);
+                        }
+                    }
+                }
             }
 
             self.tx_primary
