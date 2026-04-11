@@ -82,7 +82,7 @@ pub struct Core {
     /// Receives loopback headers from the `HeaderWaiter`.
     rx_header_waiter: Receiver<Header>,
     /// Receives loopback certificates from the `CertificateWaiter`.
-    rx_certificate_waiter: Receiver<Certificate>,
+    rx_certificate_waiter: Receiver<(Certificate, bool)>,
     /// Receives our newly created headers from the `Proposer`.
     rx_proposer: Receiver<Header>,
     /// Output all certificates to the consensus layer.
@@ -104,9 +104,11 @@ pub struct Core {
     votes_aggregators: HashMap<Digest, VotesAggregator>,
     /// Votes received before their corresponding header becomes locally known.
     buffered_votes: HashMap<Digest, Vec<Vote>>,
-    /// Tracks headers for which a certificate has already been formed or delivered.
-    certified_headers: HashMap<Digest, Round>,
-    /// Aggregates certificates to use as parents for new headers.
+    /// Tracks headers for which this node has locally assembled a certificate.
+    locally_certified_headers: HashMap<Digest, Round>,
+    /// Tracks certificate digests already processed and delivered downstream.
+    processed_certificates: HashSet<Digest>,
+    /// Aggregates locally assembled certificates to use as parents for new headers.
     certificates_aggregators: HashMap<Round, Box<CertificatesAggregator>>,
     /// Tracks prepare-like support for headers of each (round, origin).
     vertex_round_states: HashMap<Round, HashMap<PublicKey, VertexRoundState>>,
@@ -612,7 +614,7 @@ impl Core {
         adaptive_wait_enabled: bool,
         rx_primaries: Receiver<PrimaryMessage>,
         rx_header_waiter: Receiver<Header>,
-        rx_certificate_waiter: Receiver<Certificate>,
+        rx_certificate_waiter: Receiver<(Certificate, bool)>,
         rx_proposer: Receiver<Header>,
         tx_consensus: Sender<Certificate>,
         tx_proposer: Sender<(ProposalParents, Round)>,
@@ -640,7 +642,8 @@ impl Core {
                 pending_headers: HashMap::with_capacity(2 * gc_depth as usize),
                 votes_aggregators: HashMap::with_capacity(2 * gc_depth as usize),
                 buffered_votes: HashMap::with_capacity(2 * gc_depth as usize),
-                certified_headers: HashMap::with_capacity(2 * gc_depth as usize),
+                locally_certified_headers: HashMap::with_capacity(2 * gc_depth as usize),
+                processed_certificates: HashSet::with_capacity(2 * gc_depth as usize),
                 certificates_aggregators: HashMap::with_capacity(2 * gc_depth as usize),
                 vertex_round_states: HashMap::with_capacity(2 * gc_depth as usize),
                 adaptive_wait_rounds: HashMap::with_capacity(2 * gc_depth as usize),
@@ -865,9 +868,9 @@ impl Core {
             self.track_adaptive_wait_progress(round).await;
         }
 
-        if self.certified_headers.contains_key(&vote_id) {
+        if self.locally_certified_headers.contains_key(&vote_id) {
             debug!(
-                "Ignoring vote for already certified header {} (round {})",
+                "Ignoring vote for locally certified header {} (round {})",
                 vote_id, vote.round
             );
             return Ok(());
@@ -894,7 +897,7 @@ impl Core {
             .entry(vote_id.clone())
             .or_insert_with(VotesAggregator::new);
         if let Some(certificate) = aggregator.append(vote, &self.committee, &header)? {
-            self.certified_headers
+            self.locally_certified_headers
                 .insert(vote_id.clone(), certificate.round());
             self.pending_headers.remove(&vote_id);
             self.votes_aggregators.remove(&vote_id);
@@ -917,7 +920,7 @@ impl Core {
             );
 
             // Process the new certificate.
-            self.process_certificate(certificate)
+            self.process_certificate(certificate, true)
                 .await
                 .expect("Failed to process valid certificate");
         }
@@ -925,16 +928,21 @@ impl Core {
     }
 
     #[async_recursion]
-    async fn process_certificate(&mut self, certificate: Certificate) -> DagResult<()> {
+    async fn process_certificate(
+        &mut self,
+        certificate: Certificate,
+        locally_assembled: bool,
+    ) -> DagResult<()> {
         let origin = certificate.origin();
         let origin_node = self
             .node_index(&origin)
             .map_or_else(|| "unknown".to_string(), |idx| idx.to_string());
         debug!(
-            "Received certificate {} (origin Node{}, round {}): entering processing pipeline",
+            "Received certificate {} (origin Node{}, round {}, local={}): entering processing pipeline",
             certificate.header.id,
             origin_node,
-            certificate.round()
+            certificate.round(),
+            locally_assembled
         );
         debug!("Processing {:?}", certificate);
 
@@ -953,7 +961,11 @@ impl Core {
 
         // Ensure we have all the ancestors of this certificate yet. If we don't, the synchronizer will gather
         // them and trigger re-processing of this certificate.
-        if !self.synchronizer.deliver_certificate(&certificate).await? {
+        if !self
+            .synchronizer
+            .deliver_certificate(&certificate, locally_assembled)
+            .await?
+        {
             debug!(
                 "Certificate {} (round {}) suspended in synchronizer: missing ancestor certificates, will be retried by CertificateWaiter",
                 certificate.header.id,
@@ -962,32 +974,40 @@ impl Core {
             return Ok(());
         }
 
-        // Store the certificate.
-        let bytes = bincode::serialize(&certificate).expect("Failed to serialize certificate");
-        self.store.write(certificate.digest().to_vec(), bytes).await;
-        self.known_headers
-            .insert(certificate.header.id.clone(), certificate.header.clone());
-        self.certified_headers
-            .insert(certificate.header.id.clone(), certificate.round());
-        self.votes_aggregators.remove(&certificate.header.id);
-        self.buffered_votes.remove(&certificate.header.id);
+        let certificate_digest = certificate.digest();
+        let first_processed = self
+            .processed_certificates
+            .insert(certificate_digest.clone());
+
+        if first_processed {
+            let bytes = bincode::serialize(&certificate).expect("Failed to serialize certificate");
+            self.store.write(certificate_digest.to_vec(), bytes).await;
+            self.known_headers
+                .insert(certificate.header.id.clone(), certificate.header.clone());
+        }
+
         let certificate_progress = self.record_certificate_delivery(&certificate);
         if certificate_progress {
             self.track_adaptive_wait_progress(certificate.round()).await;
         }
 
-        // Aggregate certificates by their own round instead of a single global current_round.
-        // Whichever round reaches the unlock condition first can be dispatched to proposer first.
-        let target_round_start = certificate.round();
-        let target_round_end = target_round_start + self.committee.solid_wave_length();
-        for target_round in target_round_start..target_round_end {
-            if let Some(parents) = self
-                .certificates_aggregators
-                .entry(target_round)
-                .or_insert_with(|| Box::new(CertificatesAggregator::new(target_round)))
-                .append(certificate.clone(), &self.committee)?
-            {
-                self.update_adaptive_wait_round(target_round, parents).await?;
+        if locally_assembled {
+            self.votes_aggregators.remove(&certificate.header.id);
+            self.buffered_votes.remove(&certificate.header.id);
+
+            // Aggregate certificates by their own round instead of a single global current_round.
+            // Whichever round reaches the unlock condition first can be dispatched to proposer first.
+            let target_round_start = certificate.round();
+            let target_round_end = target_round_start + self.committee.solid_wave_length();
+            for target_round in target_round_start..target_round_end {
+                if let Some(parents) = self
+                    .certificates_aggregators
+                    .entry(target_round)
+                    .or_insert_with(|| Box::new(CertificatesAggregator::new(target_round)))
+                    .append(certificate.clone(), &self.committee)?
+                {
+                    self.update_adaptive_wait_round(target_round, parents).await?;
+                }
             }
         }
 
@@ -1023,22 +1043,24 @@ impl Core {
         // }
 
         // Send it to the consensus layer.
-        let id = certificate.header.id.clone();
-        let origin = certificate.origin();
-        let origin_node = self
-            .node_index(&origin)
-            .map_or_else(|| "unknown".to_string(), |idx| idx.to_string());
-        debug!(
-            "Delivered certificate {} (origin Node{}, round {}) to the consensus",
-            id,
-            origin_node,
-            certificate.round()
-        );
-        if let Err(e) = self.tx_consensus.send(certificate).await {
-            warn!(
-                "Failed to deliver certificate {} to the consensus: {}",
-                id, e
+        if first_processed {
+            let id = certificate.header.id.clone();
+            let origin = certificate.origin();
+            let origin_node = self
+                .node_index(&origin)
+                .map_or_else(|| "unknown".to_string(), |idx| idx.to_string());
+            debug!(
+                "Delivered certificate {} (origin Node{}, round {}) to the consensus",
+                id,
+                origin_node,
+                certificate.round()
             );
+            if let Err(e) = self.tx_consensus.send(certificate).await {
+                warn!(
+                    "Failed to deliver certificate {} to the consensus: {}",
+                    id, e
+                );
+            }
         }
         Ok(())
     }
@@ -1133,17 +1155,18 @@ impl Core {
                             }
                         },
                         PrimaryMessage::Certificate(certificate) => {
-                            let origin = certificate.origin();
-                            let origin_node = self
-                                .node_index(&origin)
-                                .map_or_else(|| "unknown".to_string(), |idx| idx.to_string());
-                            debug!(
-                                "Ignoring remotely received certificate {} (origin Node{}, round {}): certificates no longer propagate across primaries",
-                                certificate.header.id,
-                                origin_node,
-                                certificate.round()
-                            );
-                            Ok(())
+                            match self.sanitize_certificate(&certificate) {
+                                Ok(()) => self.process_certificate(certificate, false).await,
+                                Err(e) => {
+                                    debug!(
+                                        "Discarding certificate {} (round {}) in sanitize_certificate: {}",
+                                        certificate.header.id,
+                                        certificate.round(),
+                                        e
+                                    );
+                                    Err(e)
+                                }
+                            }
                         },
                         _ => panic!("Unexpected core message")
                     }
@@ -1167,7 +1190,7 @@ impl Core {
                 // We receive here loopback certificates from the `CertificateWaiter`. Those are certificates for which
                 // we interrupted execution (we were missing some of their ancestors) and we are now ready to resume
                 // processing.
-                Some(certificate) = self.rx_certificate_waiter.recv() => {
+                Some((certificate, locally_assembled)) = self.rx_certificate_waiter.recv() => {
                     let origin = certificate.origin();
                     let origin_node = self
                         .node_index(&origin)
@@ -1178,7 +1201,7 @@ impl Core {
                         origin_node,
                         certificate.round()
                     );
-                    self.process_certificate(certificate).await
+                    self.process_certificate(certificate, locally_assembled).await
                 },
 
                 // We also receive here our new headers created by the `Proposer`.
@@ -1201,6 +1224,8 @@ impl Core {
                 let gc_round = round - self.gc_depth;
                 self.last_voted.retain(|k, _| k >= &gc_round);
                 self.processing.retain(|k, _| k >= &gc_round);
+                self.locally_certified_headers
+                    .retain(|_, round| *round >= gc_round);
                 self.certificates_aggregators.retain(|k, _| k >= &gc_round);
                 self.vertex_round_states.retain(|k, _| k >= &gc_round);
                 self.adaptive_wait_rounds.retain(|k, _| k >= &gc_round);

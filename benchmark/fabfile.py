@@ -274,7 +274,7 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2, enable_wait=True):
         'tx_size': 512,
         'duration': 120,
         'runs': 2,
-        'network_tag': 'geo415-wait',
+        'network_tag': 'geo415-wait-payload',
         'rtt_tag': '415',
     }
     node_params = {

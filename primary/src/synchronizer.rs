@@ -22,7 +22,7 @@ pub struct Synchronizer {
     /// Send commands to the `HeaderWaiter`.
     tx_header_waiter: Sender<WaiterMessage>,
     /// Send commands to the `CertificateWaiter`.
-    tx_certificate_waiter: Sender<Certificate>,
+    tx_certificate_waiter: Sender<(Certificate, bool)>,
     /// The genesis and its digests.
     genesis: Vec<(Digest, Certificate)>,
 }
@@ -33,7 +33,7 @@ impl Synchronizer {
         committee: &Committee,
         store: Store,
         tx_header_waiter: Sender<WaiterMessage>,
-        tx_certificate_waiter: Sender<Certificate>,
+        tx_certificate_waiter: Sender<(Certificate, bool)>,
     ) -> Self {
         let authorities = committee.authorities.keys().cloned().collect();
         Self {
@@ -157,7 +157,11 @@ impl Synchronizer {
 
     /// Check whether we have all the ancestors of the certificate. If we don't, send the certificate to
     /// the `CertificateWaiter` which will trigger re-processing once we have all the missing data.
-    pub async fn deliver_certificate(&mut self, certificate: &Certificate) -> DagResult<bool> {
+    pub async fn deliver_certificate(
+        &mut self,
+        certificate: &Certificate,
+        locally_assembled: bool,
+    ) -> DagResult<bool> {
         for digest in &certificate.header.parents {
             if self.genesis.iter().any(|(x, _)| x == digest) {
                 continue;
@@ -165,7 +169,7 @@ impl Synchronizer {
 
             if self.store.read(digest.to_vec()).await?.is_none() {
                 self.tx_certificate_waiter
-                    .send(certificate.clone())
+                    .send((certificate.clone(), locally_assembled))
                     .await
                     .expect("Failed to send sync certificate request");
                 return Ok(false);

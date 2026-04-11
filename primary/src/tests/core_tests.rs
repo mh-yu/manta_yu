@@ -104,7 +104,7 @@ async fn process_header_missing_parent() {
     // Create a new test store.
     let path = ".db_test_process_header_missing_parent";
     let _ = fs::remove_dir_all(path);
-    let store = Store::new(path).unwrap();
+    let mut store = Store::new(path).unwrap();
 
     // Make a synchronizer for the core.
     let synchronizer = Synchronizer::new(
@@ -227,7 +227,7 @@ async fn process_votes() {
     // Create a new test store.
     let path = ".db_test_process_vote";
     let _ = fs::remove_dir_all(path);
-    let mut store = Store::new(path).unwrap();
+    let store = Store::new(path).unwrap();
 
     // Make a synchronizer for the core.
     let synchronizer = Synchronizer::new(

@@ -1,7 +1,7 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::error::{DagError, DagResult};
 use crate::messages::Header;
-use crate::primary::{PrimaryWorkerMessage, Round};
+use crate::primary::{PrimaryMessage, PrimaryWorkerMessage, Round};
 use bytes::Bytes;
 use config::{Committee, WorkerId};
 use crypto::{Digest, PublicKey};
@@ -13,6 +13,7 @@ use network::SimpleSender;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{sleep, Duration};
@@ -40,6 +41,10 @@ pub struct HeaderWaiter {
     consensus_round: Arc<AtomicU64>,
     /// The depth of the garbage collector.
     gc_depth: Round,
+    /// The delay after which the waiter retries sync requests.
+    sync_retry_delay: u64,
+    /// The number of random nodes to contact when retrying certificate sync.
+    sync_retry_nodes: usize,
     /// Receives sync commands from the `Synchronizer`.
     rx_synchronizer: Receiver<WaiterMessage>,
     /// Loops back to the core headers for which we got all parents and batches.
@@ -50,6 +55,8 @@ pub struct HeaderWaiter {
     /// Keeps the digests of the all tx batches for which we sent a sync request,
     /// similarly to `header_requests`.
     batch_requests: HashMap<Digest, Round>,
+    /// Keeps the parent certificate digests for which we sent a sync request.
+    parent_requests: HashMap<Digest, (Round, u128)>,
     /// List of digests (either certificates, headers or tx batch) that are waiting
     /// to be processed. Their processing will resume when we get all their dependencies.
     pending: HashMap<Digest, (Round, Sender<()>)>,
@@ -63,8 +70,8 @@ impl HeaderWaiter {
         store: Store,
         consensus_round: Arc<AtomicU64>,
         gc_depth: Round,
-        _sync_retry_delay: u64,
-        _sync_retry_nodes: usize,
+        sync_retry_delay: u64,
+        sync_retry_nodes: usize,
         rx_synchronizer: Receiver<WaiterMessage>,
         tx_core: Sender<Header>,
     ) {
@@ -75,10 +82,13 @@ impl HeaderWaiter {
                 store,
                 consensus_round,
                 gc_depth,
+                sync_retry_delay,
+                sync_retry_nodes,
                 rx_synchronizer,
                 tx_core,
                 network: SimpleSender::new(),
                 batch_requests: HashMap::new(),
+                parent_requests: HashMap::new(),
                 pending: HashMap::new(),
             }
             .run()
@@ -191,7 +201,10 @@ impl HeaderWaiter {
                             debug!("Synching the parents of {}", header);
                             let header_id = header.id.clone();
                             let round = header.round;
-                            let author = header.author;
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Failed to measure time")
+                                .as_millis();
 
                             // Ensure we sync only once per header.
                             if self.pending.contains_key(&header_id) {
@@ -210,6 +223,27 @@ impl HeaderWaiter {
                             let fut = Self::waiter(wait_for, header, rx_cancel);
                             waiting.push(fut);
 
+                            let mut requires_sync = Vec::new();
+                            for digest in missing.into_iter() {
+                                self.parent_requests.entry(digest.clone()).or_insert_with(|| {
+                                    requires_sync.push(digest);
+                                    (round, now)
+                                });
+                            }
+                            if !requires_sync.is_empty() {
+                                let addresses = self
+                                    .committee
+                                    .others_primaries(&self.name)
+                                    .into_iter()
+                                    .map(|(_, address)| address.primary_to_primary)
+                                    .collect();
+                                let message =
+                                    PrimaryMessage::CertificatesRequest(requires_sync, self.name);
+                                let bytes = bincode::serialize(&message)
+                                    .expect("Failed to serialize certificate sync request");
+                                self.network.broadcast(addresses, Bytes::from(bytes)).await;
+                            }
+
                         }
                     }
                 },
@@ -217,13 +251,16 @@ impl HeaderWaiter {
                 Some(result) = waiting.next() => match result {
                     Ok(Some(header)) => {
                         debug!(
-                            "All batches received for header {} (round {}), sending back to Core for reprocessing",
+                            "All dependencies received for header {} (round {}), sending back to Core for reprocessing",
                             header.id,
                             header.round
                         );
                         let _ = self.pending.remove(&header.id);
                         for x in header.payload.keys() {
                             let _ = self.batch_requests.remove(x);
+                        }
+                        for x in &header.parents {
+                            let _ = self.parent_requests.remove(x);
                         }
                         self.tx_core.send(header).await.expect("Failed to send header");
                     },
@@ -237,6 +274,36 @@ impl HeaderWaiter {
                 },
 
                 () = &mut timer => {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Failed to measure time")
+                        .as_millis();
+                    let retry: Vec<_> = self
+                        .parent_requests
+                        .iter()
+                        .filter_map(|(digest, (_, timestamp))| {
+                            if *timestamp + (self.sync_retry_delay as u128) < now {
+                                Some(digest.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if !retry.is_empty() {
+                        let addresses = self
+                            .committee
+                            .others_primaries(&self.name)
+                            .into_iter()
+                            .map(|(_, address)| address.primary_to_primary)
+                            .collect();
+                        let message = PrimaryMessage::CertificatesRequest(retry, self.name);
+                        let bytes = bincode::serialize(&message)
+                            .expect("Failed to serialize certificate sync request");
+                        self.network
+                            .lucky_broadcast(addresses, Bytes::from(bytes), self.sync_retry_nodes)
+                            .await;
+                    }
+
                     // Reschedule the timer.
                     timer.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(TIMER_RESOLUTION));
                 }
@@ -266,6 +333,7 @@ impl HeaderWaiter {
                 }
                 self.pending.retain(|_, (r, _)| r > &mut gc_round);
                 self.batch_requests.retain(|_, r| r > &mut gc_round);
+                self.parent_requests.retain(|_, (r, _)| r > &mut gc_round);
             }
         }
     }

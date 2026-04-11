@@ -14,16 +14,16 @@ pub struct CertificateWaiter {
     /// The persistent storage.
     store: Store,
     /// Receives sync commands from the `Synchronizer`.
-    rx_synchronizer: Receiver<Certificate>,
+    rx_synchronizer: Receiver<(Certificate, bool)>,
     /// Loops back to the core certificates for which we got all parents.
-    tx_core: Sender<Certificate>,
+    tx_core: Sender<(Certificate, bool)>,
 }
 
 impl CertificateWaiter {
     pub fn spawn(
         store: Store,
-        rx_synchronizer: Receiver<Certificate>,
-        tx_core: Sender<Certificate>,
+        rx_synchronizer: Receiver<(Certificate, bool)>,
+        tx_core: Sender<(Certificate, bool)>,
     ) {
         tokio::spawn(async move {
             Self {
@@ -40,8 +40,8 @@ impl CertificateWaiter {
     /// and then delivers the specified header.
     async fn waiter(
         mut missing: Vec<(Vec<u8>, Store)>,
-        deliver: Certificate,
-    ) -> DagResult<Certificate> {
+        deliver: (Certificate, bool),
+    ) -> DagResult<(Certificate, bool)> {
         let waiting: Vec<_> = missing
             .iter_mut()
             .map(|(x, y)| y.notify_read(x.to_vec()))
@@ -58,7 +58,7 @@ impl CertificateWaiter {
 
         loop {
             tokio::select! {
-                Some(certificate) = self.rx_synchronizer.recv() => {
+                Some((certificate, locally_assembled)) = self.rx_synchronizer.recv() => {
                     // Add the certificate to the waiter pool. The waiter will return it to us
                     // when all its parents are in the store.
                     let wait_for = certificate
@@ -68,7 +68,7 @@ impl CertificateWaiter {
                         .cloned()
                         .map(|x| (x.to_vec(), self.store.clone()))
                         .collect();
-                    let fut = Self::waiter(wait_for, certificate);
+                    let fut = Self::waiter(wait_for, (certificate, locally_assembled));
                     waiting.push(fut);
                 }
                 Some(result) = waiting.next() => match result {

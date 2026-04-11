@@ -4,6 +4,7 @@ use crate::core::Core;
 use crate::error::DagError;
 use crate::garbage_collector::GarbageCollector;
 use crate::header_waiter::HeaderWaiter;
+use crate::helper::Helper;
 use crate::messages::{Certificate, Header, Vote};
 use crate::payload_receiver::PayloadReceiver;
 use crate::proposer::Proposer;
@@ -74,6 +75,7 @@ impl Primary {
         let (tx_headers_loopback, rx_headers_loopback) = channel(CHANNEL_CAPACITY);
         let (tx_certificates_loopback, rx_certificates_loopback) = channel(CHANNEL_CAPACITY);
         let (tx_primary_messages, rx_primary_messages) = channel(CHANNEL_CAPACITY);
+        let (tx_cert_requests, rx_cert_requests) = channel(CHANNEL_CAPACITY);
 
         // Write the parameters to the logs.
         parameters.log();
@@ -97,6 +99,7 @@ impl Primary {
             /* handler */
             PrimaryReceiverHandler {
                 tx_primary_messages,
+                tx_cert_requests,
             },
         );
         info!(
@@ -182,6 +185,8 @@ impl Primary {
             /* tx_core */ tx_certificates_loopback,
         );
 
+        Helper::spawn(committee.clone(), store.clone(), rx_cert_requests);
+
         // When the `Core` collects enough parent certificates, the `Proposer` generates a new header with new batch
         // digests from our workers and it back to the `Core`.
         Proposer::spawn(
@@ -213,6 +218,7 @@ impl Primary {
 #[derive(Clone)]
 struct PrimaryReceiverHandler {
     tx_primary_messages: Sender<PrimaryMessage>,
+    tx_cert_requests: Sender<(Vec<Digest>, PublicKey)>,
 }
 
 #[async_trait]
@@ -223,7 +229,11 @@ impl MessageHandler for PrimaryReceiverHandler {
 
         // Deserialize and parse the message.
         match bincode::deserialize(&serialized).map_err(DagError::SerializationError)? {
-            PrimaryMessage::CertificatesRequest(..) => (),
+            PrimaryMessage::CertificatesRequest(digests, requestor) => self
+                .tx_cert_requests
+                .send((digests, requestor))
+                .await
+                .expect("Failed to send certificate request"),
             request => self
                 .tx_primary_messages
                 .send(request)
