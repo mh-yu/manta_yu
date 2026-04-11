@@ -168,8 +168,8 @@ impl Worker {
                 .collect(),
         );
 
-        // The `QuorumWaiter` waits for 2f authorities to acknowledge reception of the batch. It then forwards
-        // the batch to the `Processor`.
+        // The `QuorumWaiter` forwards the batch to the `Processor` immediately after sealing.
+        // Reliable worker-to-worker broadcast still happens in the background.
         QuorumWaiter::spawn(
             self.committee.clone(),
             /* stake */ self.committee.stake(&self.name),
