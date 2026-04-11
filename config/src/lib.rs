@@ -213,6 +213,12 @@ impl Committee {
         (total_votes + 2) / 3
     }
 
+    /// Minimum number of parent certificates treated as the \(n-f\) honest majority (unit-stake model).
+    /// For \(N=3f+1+k\), this is \(N-f = 2f+1+k\), i.e. `size - floor((size-1)/3)`.
+    pub fn n_minus_f_threshold(&self) -> usize {
+        self.size() - (self.size().saturating_sub(1) / 3)
+    }
+
     pub fn max_threshold(&self) -> Stake {
         self.coverage as Stake
     }

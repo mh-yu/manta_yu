@@ -383,11 +383,11 @@ impl Core {
         changed
     }
 
-    async fn broadcast_certificate(&mut self, certificate: &Certificate) {
+    async fn broadcast_sync_certificate(&mut self, certificate: &Certificate) {
         let cert_id = certificate.header.id.clone();
         let cert_round = certificate.round();
         debug!(
-            "Broadcasting certificate {} (round {}) to other primaries",
+            "Broadcasting weak certificate {} (round {}) to other primaries",
             cert_id, cert_round
         );
         let addresses: Vec<_> = self
@@ -396,8 +396,8 @@ impl Core {
             .iter()
             .map(|(_, x)| x.primary_to_primary)
             .collect();
-        let bytes = bincode::serialize(&PrimaryMessage::Certificate(certificate.clone()))
-            .expect("Failed to serialize our own certificate");
+        let bytes = bincode::serialize(&PrimaryMessage::SyncWeakCertificate(certificate.clone()))
+            .expect("Failed to serialize our own weak certificate");
         for address in addresses {
             let handler = self.network.send(address, Bytes::from(bytes.clone())).await;
             let id = cert_id.clone();
@@ -405,18 +405,45 @@ impl Core {
                 match handler.await {
                     Ok(_) => {
                         debug!(
-                            "Certificate {} (round {}) successfully delivered to primary {}",
+                            "Weak certificate {} (round {}) successfully delivered to primary {}",
                             id, cert_round, address
                         );
                     }
                     Err(_) => {
                         debug!(
-                            "Certificate {} (round {}) delivery to primary {} was canceled or failed",
+                            "Weak certificate {} (round {}) delivery to primary {} was canceled or failed",
                             id, cert_round, address
                         );
                     }
                 }
             });
+        }
+    }
+
+    async fn broadcast_waiting_weak_certificates(
+        &mut self,
+        waiting_vertices: &HashMap<PublicKey, Digest>,
+    ) {
+        let waiting_ids: Vec<_> = waiting_vertices.values().cloned().collect();
+        let validity_threshold = self.committee.validity_threshold();
+        for digest in waiting_ids {
+            if self.certified_headers.contains_key(&digest) {
+                continue;
+            }
+
+            let header = match self.known_headers.get(&digest) {
+                Some(header) => header.clone(),
+                None => continue,
+            };
+
+            let weak_certificate = self
+                .votes_aggregators
+                .get_mut(&digest)
+                .and_then(|aggregator| aggregator.weak_certificate_if_ready(validity_threshold, &header));
+
+            if let Some(weak_certificate) = weak_certificate {
+                self.broadcast_sync_certificate(&weak_certificate).await;
+            }
         }
     }
 
@@ -495,6 +522,8 @@ impl Core {
             state.initial_parent_count = state.proposal_parents.parents.len();
             state.initial_parent_digests = state.proposal_parents.parents.iter().cloned().collect();
             self.log_adaptive_wait_start(round, &state);
+            self.broadcast_waiting_weak_certificates(&state.waiting_vertices)
+                .await;
         } else if observed_progress {
             state.extensions += 1;
             self.log_adaptive_wait_extend(
@@ -953,13 +982,47 @@ impl Core {
                 header.round
             );
 
-            self.broadcast_certificate(&certificate).await;
-
             // Process the new certificate.
             self.process_certificate(certificate)
                 .await
                 .expect("Failed to process valid certificate");
         }
+        Ok(())
+    }
+
+    #[async_recursion]
+    async fn process_sync_weak_certificate(&mut self, certificate: Certificate) -> DagResult<()> {
+        let header = certificate.header.clone();
+        let origin = certificate.origin();
+        let origin_node = self
+            .node_index(&origin)
+            .map_or_else(|| "unknown".to_string(), |idx| idx.to_string());
+        debug!(
+            "Received weak certificate {} (origin Node{}, round {}): replaying votes",
+            header.id,
+            origin_node,
+            certificate.round()
+        );
+
+        if !self
+            .processing
+            .get(&header.round)
+            .map_or_else(|| false, |x| x.contains(&header.id))
+        {
+            self.process_header(&header).await?;
+        }
+
+        for (author, signature) in certificate.votes {
+            let vote = Vote {
+                id: header.id.clone(),
+                round: header.round,
+                origin: header.author,
+                author,
+                signature,
+            };
+            self.process_vote(vote).await?;
+        }
+
         Ok(())
     }
 
@@ -1127,6 +1190,17 @@ impl Core {
         certificate.verify(&self.committee).map_err(DagError::from)
     }
 
+    fn sanitize_sync_weak_certificate(&mut self, certificate: &Certificate) -> DagResult<()> {
+        ensure!(
+            self.gc_round <= certificate.round(),
+            DagError::TooOld(certificate.digest(), certificate.round())
+        );
+
+        certificate
+            .verify_with_threshold(&self.committee, self.committee.validity_threshold())
+            .map_err(DagError::from)
+    }
+
     // Main loop listening to incoming messages.
     pub async fn run(&mut self) {
         loop {
@@ -1187,6 +1261,30 @@ impl Core {
                                 Err(e) => {
                                     debug!(
                                         "Discarding certificate {} (round {}) in sanitize_certificate: {}",
+                                        certificate.header.id,
+                                        certificate.round(),
+                                        e
+                                    );
+                                    Err(e)
+                                }
+                            }
+                        },
+                        PrimaryMessage::SyncWeakCertificate(certificate) => {
+                            let origin = certificate.origin();
+                            let origin_node = self
+                                .node_index(&origin)
+                                .map_or_else(|| "unknown".to_string(), |idx| idx.to_string());
+                            debug!(
+                                "Channel recv weak certificate {} (origin Node{}, round {})",
+                                certificate.header.id,
+                                origin_node,
+                                certificate.round()
+                            );
+                            match self.sanitize_sync_weak_certificate(&certificate) {
+                                Ok(()) => self.process_sync_weak_certificate(certificate).await,
+                                Err(e) => {
+                                    debug!(
+                                        "Discarding weak certificate {} (round {}) in sanitize_sync_weak_certificate: {}",
                                         certificate.header.id,
                                         certificate.round(),
                                         e

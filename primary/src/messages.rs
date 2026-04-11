@@ -1,7 +1,7 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::error::{DagError, DagResult};
 use crate::primary::Round;
-use config::{Committee, WorkerId};
+use config::{Committee, Stake, WorkerId};
 use crypto::{Digest, Hash, PublicKey, Signature, SignatureService};
 use ed25519_dalek::Digest as _;
 use ed25519_dalek::Sha512;
@@ -234,6 +234,14 @@ impl Certificate {
     }
 
     pub fn verify(&self, committee: &Committee) -> DagResult<()> {
+        self.verify_with_threshold(committee, committee.quorum_threshold())
+    }
+
+    pub fn verify_with_threshold(
+        &self,
+        committee: &Committee,
+        threshold: Stake,
+    ) -> DagResult<()> {
         // Genesis certificates are always valid.
         if Self::genesis(committee).contains(self) {
             return Ok(());
@@ -252,10 +260,7 @@ impl Certificate {
             used.insert(*name);
             weight += voting_rights;
         }
-        ensure!(
-            weight >= committee.quorum_threshold(),
-            DagError::CertificateRequiresQuorum
-        );
+        ensure!(weight >= threshold, DagError::CertificateRequiresQuorum);
 
         // Check the signatures.
         Signature::verify_batch(&self.digest(), &self.votes).map_err(DagError::from)

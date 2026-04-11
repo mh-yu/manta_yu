@@ -51,6 +51,9 @@ pub enum DagError {
     #[error("Received certificate without a quorum")]
     CertificateRequiresQuorum,
 
+    #[error("Received certificate without enough voting weight (weak QC / sync)")]
+    CertificateInsufficientVoteWeight,
+
     #[error("Parents of header {0} are not a quorum")]
     HeaderRequiresQuorum(Digest),
 
