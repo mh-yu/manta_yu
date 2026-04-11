@@ -3,7 +3,8 @@ from fabric import task
 
 from benchmark.local import LocalBench
 from benchmark.logs import ParseError, LogParser
-from benchmark.utils import Print
+from benchmark.run_artifacts import create_run_dir, write_run_artifacts
+from benchmark.utils import PathMaker, Print
 from benchmark.cloudlab_instance import CloudLabInstanceManager
 from benchmark.cloudlab_remote import CloudLabBench
 from benchmark.cloudlab_wan import CloudLabWan
@@ -36,35 +37,85 @@ def _as_bool(value):
 
 
 @task
-def local(ctx, debug=False, enable_wait=True):
+def local(
+    ctx,
+    debug=False,
+    enable_wait=True,
+    nodes=10,
+    rate=40000,
+    duration=20,
+    runs=1,
+    network_tag='auto',
+    rtt_tag='local',
+):
     ''' Run benchmarks on localhost '''
+    enable_wait = _as_bool(enable_wait)
+    nodes = int(nodes)
+    rate = int(rate)
+    duration = int(duration)
+    runs = int(runs)
+    network_tag = str(network_tag).strip()
+    if not network_tag or network_tag == 'auto':
+        network_tag = 'local-wait' if enable_wait else 'local-nowait'
+
     bench_params = {
         'faults': 0,
-        'nodes': 10,
+        'nodes': nodes,
         'workers': 1,
         'rate_type': 'balanced',
-        'rate': 80000,
+        'rate': rate,
         'tx_size': 512,
-        'duration': 20,
+        'duration': duration,
+        'runs': runs,
     }
     node_params = {
         'header_size': 1000,  # bytes
-        'max_header_delay': 200,  # ms
+        'max_header_delay': 50,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
         'batch_size': 500_000,  # bytes
-        'max_batch_delay': 200,  # ms
-        'sigma': 2,
-        'kappa': 2,
+        'max_batch_delay': 50,  # ms
+        'sigma': 1,
+        'kappa': 3,
         'reference': 4,
         'coverage': 7,
         's': 0.99,
-        'enable_wait': _as_bool(enable_wait),
+        'enable_wait': enable_wait,
     }
     try:
-        ret = LocalBench(bench_params, node_params).run(debug)
-        print(ret.result())
+        for run_index in range(runs):
+            if runs > 1:
+                Print.heading(
+                    f'\nRunning local benchmark: nodes={nodes}, rate={rate}, run={run_index+1}/{runs}'
+                )
+
+            bench = LocalBench(bench_params, node_params)
+            ret = bench.run(debug)
+            print(ret.result())
+            ret.print(
+                PathMaker.result_file(
+                    bench.bench_parameters.faults,
+                    nodes,
+                    bench.bench_parameters.workers,
+                    bench.bench_parameters.collocate,
+                    rate,
+                    bench.bench_parameters.tx_size,
+                )
+            )
+
+            run_dir = create_run_dir(network_tag, nodes, rate, run_index, runs)
+            write_run_artifacts(
+                run_dir,
+                ret,
+                bench.bench_parameters,
+                nodes,
+                rate,
+                run_index,
+                network_tag,
+                rtt_tag,
+            )
+            Print.info(f'Per-run artifacts saved to: {run_dir}')
     except BenchError as e:
         Print.error(e)
 
@@ -261,7 +312,7 @@ def cloudlab_wan(ctx, action='setup', settings_file='cloudlab_settings.json'):
 
 
 @task
-def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2, enable_wait=True):
+def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3, enable_wait=True):
     ''' Run benchmarks on CloudLab '''
     bench_params = {
         'faults': 0,
@@ -269,13 +320,13 @@ def cloudlab_remote(ctx, debug=False, sigma=3, kappa=2, enable_wait=True):
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'rate': [40000],
-        # 'rate': [40000, 60000, 80000, 100000, 120000, 140000],
+        # 'rate': [40000,60000],
+        'rate': [80000, 100000, 120000, 140000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 2,
-        'network_tag': 'geo415-wait',
-        'rtt_tag': '415',
+        'runs': 1,
+        'network_tag': 'geo631-wait',
+        'rtt_tag': '631',
     }
     node_params = {
         'header_size': 1_000,  # bytes

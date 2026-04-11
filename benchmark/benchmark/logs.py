@@ -20,6 +20,7 @@ class LogParser:
         assert all(isinstance(x, list) for x in inputs)
         assert all(isinstance(x, str) for y in inputs for x in y)
         assert all(x for x in inputs)
+        self._end_to_end_latency_cache = None
 
         self.faults = faults
         if isinstance(faults, int):
@@ -48,12 +49,30 @@ class LogParser:
                 'falling back to configured transaction size/rate values'
             )
             results = [
-                (default_client_size, rates[i], None, 0, {})
+                (
+                    default_client_size,
+                    rates[i],
+                    None,
+                    0,
+                    {},
+                    {'recovered_truncated': 0, 'interpolated': 0},
+                )
                 for i in range(len(clients))
             ]
-        self.size, self.rate, self.start, misses, self.sent_samples \
+        self.size, self.rate, self.start, misses, self.sent_samples, repairs \
             = zip(*results)
         self.misses = sum(misses)
+        recovered_truncated = sum(x['recovered_truncated'] for x in repairs)
+        interpolated = sum(x['interpolated'] for x in repairs)
+        if recovered_truncated:
+            Print.warn(
+                f'Recovered {recovered_truncated:,} client sample timestamp(s) '
+                'from truncated log lines'
+            )
+        if interpolated:
+            Print.warn(
+                f'Interpolated {interpolated:,} missing client sample timestamp(s)'
+            )
 
         # Parse the primaries logs.
         try:
@@ -94,6 +113,61 @@ class LogParser:
                     merged[k] = v
         return merged
 
+    def _repair_client_samples(self, log, samples):
+        repaired_from_truncated = 0
+        interpolated = 0
+
+        # Under heavy logging load, some client lines are occasionally glued
+        # together and lose the trailing "transaction <id>" portion while
+        # still preserving each timestamp prefix.
+        truncated_timestamps = [
+            self._to_posix(t)
+            for t in findall(
+                r'\[+([^\] \[]+) [^\]]*\] Sending sample transac(?=\[)',
+                log,
+            )
+        ]
+
+        if not samples:
+            return {
+                'recovered_truncated': repaired_from_truncated,
+                'interpolated': interpolated,
+            }
+
+        ordered_ids = sorted(samples)
+        truncated_index = 0
+        for prev_id, next_id in zip(ordered_ids, ordered_ids[1:]):
+            missing_ids = list(range(prev_id + 1, next_id))
+            if not missing_ids:
+                continue
+
+            recovered_here = min(
+                len(missing_ids),
+                len(truncated_timestamps) - truncated_index,
+            )
+            for offset in range(recovered_here):
+                samples[missing_ids[offset]] = truncated_timestamps[
+                    truncated_index + offset
+                ]
+            truncated_index += recovered_here
+            repaired_from_truncated += recovered_here
+
+            remaining_ids = missing_ids[recovered_here:]
+            if len(remaining_ids) == 1:
+                missing_id = remaining_ids[0]
+                left_id = missing_id - 1
+                right_id = missing_id + 1
+                if left_id in samples and right_id in samples:
+                    samples[missing_id] = (
+                        samples[left_id] + samples[right_id]
+                    ) / 2
+                    interpolated += 1
+
+        return {
+            'recovered_truncated': repaired_from_truncated,
+            'interpolated': interpolated,
+        }
+
     def _parse_clients(self, log):
         if search(r'Error', log) is not None:
             raise ParseError('Client(s) panicked')
@@ -108,8 +182,9 @@ class LogParser:
 
         tmp = findall(r'\[+([^\] \[]+) [^\]]*\] Sending sample transaction (\d+)', log)
         samples = {int(s): self._to_posix(t) for t, s in tmp}
+        repairs = self._repair_client_samples(log, samples)
 
-        return size, rate, start, misses, samples
+        return size, rate, start, misses, samples, repairs
 
     def _parse_primaries(self, log):
         if search(r'(?:panicked|Error)', log) is not None:
@@ -197,15 +272,27 @@ class LogParser:
         return tps, bps, duration
 
     def _end_to_end_latency(self):
+        if self._end_to_end_latency_cache is not None:
+            return self._end_to_end_latency_cache
+
         latency = []
+        missing_sent = 0
         for sent, received in zip(self.sent_samples, self.received_samples):
             for tx_id, batch_id in received.items():
                 if batch_id in self.commits:
-                    assert tx_id in sent  # We receive txs that we sent.
+                    if tx_id not in sent:
+                        missing_sent += 1
+                        continue
                     start = sent[tx_id]
                     end = self.commits[batch_id]
                     latency += [end-start]
-        return mean(latency) if latency else 0
+        if missing_sent:
+            Print.warn(
+                f'Skipped {missing_sent:,} committed sample tx(s) missing '
+                'client send timestamps'
+            )
+        self._end_to_end_latency_cache = mean(latency) if latency else 0
+        return self._end_to_end_latency_cache
 
     def result(self):
         header_size = self.configs[0]['header_size']
