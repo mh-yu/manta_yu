@@ -301,7 +301,7 @@ def cloudlab_remote(
     adaptive_intermediate_spill_cap_digests=1,
 
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
-    design_tag='manta_cert',
+    design_tag='manta_cert_recheck_5',
     network_tag='geo631',
     load_tag='balanced_50_50',
 ):
