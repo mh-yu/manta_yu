@@ -436,43 +436,51 @@ impl Core {
                 header.round
             );
 
-            // Broadcast the certificate:
-            // 1. Local node assembles certificate from votes
-            // 2. Certificate is broadcast to all other primaries
-            // 3. Each primary delivers it to `Core::process_certificate`
-            let cert_id = certificate.header.id.clone();
-            let cert_round = certificate.round();
-            debug!(
-                "Broadcasting certificate {} (round {}) to other primaries",
-                cert_id, cert_round
-            );
-            let addresses: Vec<_> = self
-                .committee
-                .others_primaries(&self.name)
-                .iter()
-                .map(|(_, x)| x.primary_to_primary)
-                .collect();
-            let bytes = bincode::serialize(&PrimaryMessage::Certificate(certificate.clone()))
-                .expect("Failed to serialize our own certificate");
-            for address in addresses {
-                let handler = self.network.send(address, Bytes::from(bytes.clone())).await;
-                let id = cert_id.clone();
-                tokio::spawn(async move {
-                    match handler.await {
-                        Ok(_) => {
-                            debug!(
-                                "Certificate {} (round {}) successfully delivered to primary {}",
-                                id, cert_round, address
-                            );
+            if certificate.origin() == self.name {
+                // Only the header author broadcasts the certificate. Other primaries may still
+                // assemble it locally and use it immediately, but they avoid duplicate network
+                // broadcasts for the same certificate.
+                let cert_id = certificate.header.id.clone();
+                let cert_round = certificate.round();
+                debug!(
+                    "Broadcasting certificate {} (round {}) to other primaries",
+                    cert_id, cert_round
+                );
+                let addresses: Vec<_> = self
+                    .committee
+                    .others_primaries(&self.name)
+                    .iter()
+                    .map(|(_, x)| x.primary_to_primary)
+                    .collect();
+                let bytes = bincode::serialize(&PrimaryMessage::Certificate(certificate.clone()))
+                    .expect("Failed to serialize our own certificate");
+                for address in addresses {
+                    let handler = self.network.send(address, Bytes::from(bytes.clone())).await;
+                    let id = cert_id.clone();
+                    tokio::spawn(async move {
+                        match handler.await {
+                            Ok(_) => {
+                                debug!(
+                                    "Certificate {} (round {}) successfully delivered to primary {}",
+                                    id, cert_round, address
+                                );
+                            }
+                            Err(_) => {
+                                debug!(
+                                    "Certificate {} (round {}) delivery to primary {} was canceled or failed",
+                                    id, cert_round, address
+                                );
+                            }
                         }
-                        Err(_) => {
-                            debug!(
-                                "Certificate {} (round {}) delivery to primary {} was canceled or failed",
-                                id, cert_round, address
-                            );
-                        }
-                    }
-                });
+                    });
+                }
+            } else {
+                debug!(
+                    "Keeping certificate {} (round {}) local: author {} will broadcast it",
+                    certificate.header.id,
+                    certificate.round(),
+                    certificate.origin(),
+                );
             }
 
             // Process the new certificate.
