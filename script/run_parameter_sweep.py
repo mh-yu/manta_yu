@@ -11,8 +11,8 @@ from itertools import product
 from pathlib import Path
 
 # Parameter values
-SIGMA_VALUES = [1, 2, 5]
-KAPPA_VALUES = [1, 2, 3, 4]
+SIGMA_VALUES = [5]
+KAPPA_VALUES = [4]
 REFERENCE_VALUES = [1, 4, 7, 10]
 COVERAGE_VALUE = 7
 INPUT_RATE_VALUES = [100000]  # Can add more rates like [20000, 40000, 80000]

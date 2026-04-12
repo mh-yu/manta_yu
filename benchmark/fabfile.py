@@ -291,8 +291,8 @@ def cloudlab_remote(
     enable_fast_coin=True, # fast-coin commit 第二轮结束提交
     solid_commit_trigger_on_solid_step=True, # r3 commit 第三轮结束提交，在收到第一个第四轮证书后 + solid_candidate_threshold 达到预期
     enable_commit_recheck=True, # r2 commit  fast_coin_candidate_threshold 达到预期
-    fast_coin_candidate_threshold=4,
-    solid_candidate_threshold=4,
+    fast_coin_candidate_threshold=1,
+    solid_candidate_threshold=1,
 
     # 这是payload 的调度，第三轮和第二轮的顶点接收payload，目前以第三轮顶点优先，多余的给第二轮
     enable_adaptive_intermediate_spill=True, # payload shceduling
@@ -300,10 +300,10 @@ def cloudlab_remote(
     adaptive_intermediate_spill_cap_digests=1,
 
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
-    design_tag='manta_final_ablation',
-    network_tag='geo55',
+    design_tag='manta_experiment2',
+    network_tag='geo631',
     load_tag='balanced_50_50',
-):
+):g
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
     enable_fast_coin = _coerce_bool(enable_fast_coin)
@@ -316,8 +316,8 @@ def cloudlab_remote(
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        # 'rate': [20000,40000,60000,80000,100000,120000,140000],
-        'rate': [40000],
+        'rate': [100000],
+        # 'rate': [40000,60000],
         # 'rate': [40000,80000,100000,120000,140000,150000,160000,180000],
         # 'rate': [130000],
         'tx_size': 512,
@@ -336,7 +336,7 @@ def cloudlab_remote(
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
-        'batch_size': 500_000,  # bytes
+        'batch_size': 500000,  # bytes
         'max_batch_delay': 50,  # ms
         'sigma': sigma,
         'kappa': kappa,
