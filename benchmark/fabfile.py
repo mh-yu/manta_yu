@@ -302,7 +302,7 @@ def cloudlab_remote(
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
     design_tag='manta_cert2',
     network_tag='geo631',
-    load_tag='balanced_80_35',
+    load_tag='balanced_50_50',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
@@ -332,12 +332,12 @@ def cloudlab_remote(
     # 'max_batch_delay': 35,  # ms
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 80,  # ms
+        'max_header_delay': 50,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
         'batch_size': 500000,  # bytes
-        'max_batch_delay': 35,  # ms
+        'max_batch_delay': 50,  # ms
         'sigma': sigma,
         'kappa': kappa,
         'reference': reference,
