@@ -51,6 +51,10 @@ class LocalBench:
                 'solid_candidate_threshold',
                 0,
             )
+            self.pending_commit_retention_waves = node_parameters_dict.get(
+                'pending_commit_retention_waves',
+                1,
+            )
             self.design_tag = node_parameters_dict.get('design_tag')
             self.network_tag = node_parameters_dict.get('network_tag')
             self.load_tag = node_parameters_dict.get('load_tag')
@@ -149,6 +153,7 @@ class LocalBench:
                 self.enable_commit_recheck,
                 self.fast_coin_candidate_threshold,
                 self.solid_candidate_threshold,
+                self.pending_commit_retention_waves,
             )
             committee.print(PathMaker.committee_file())
 

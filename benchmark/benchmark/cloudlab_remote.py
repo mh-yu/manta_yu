@@ -990,6 +990,10 @@ class CloudLabBench:
             'solid_candidate_threshold',
             0,
         )
+        pending_commit_retention_waves = node_parameters.json.get(
+            'pending_commit_retention_waves',
+            1,
+        )
         committee = Committee(
             addresses,
             self.settings.base_port,
@@ -1003,6 +1007,7 @@ class CloudLabBench:
             enable_commit_recheck,
             fast_coin_candidate_threshold,
             solid_candidate_threshold,
+            pending_commit_retention_waves,
         )
         committee.print(PathMaker.committee_file())
         
@@ -1625,6 +1630,7 @@ SCRIPTEOF'''
                                             'enable_commit_recheck',
                                             'fast_coin_candidate_threshold',
                                             'solid_candidate_threshold',
+                                            'pending_commit_retention_waves',
                                             'enable_adaptive_intermediate_spill',
                                             'adaptive_intermediate_spill_trigger_digests',
                                             'adaptive_intermediate_spill_cap_digests',

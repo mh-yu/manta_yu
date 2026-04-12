@@ -42,6 +42,7 @@ pub fn mock_committee() -> Committee {
         enable_commit_recheck: true,
         fast_coin_candidate_threshold: 0,
         solid_candidate_threshold: 0,
+        pending_commit_retention_waves: 1,
         solid_commit_trigger_on_solid_step: true,
     }
 }
@@ -1125,4 +1126,114 @@ fn wave_start_fallback_clears_candidate_gate_for_existing_solid_pending() {
         !pending.candidate_gate_enabled,
         "the default round-5 fallback must clear the earlier solid candidate gate"
     );
+}
+
+#[test]
+fn retention_one_wave_retires_previous_fast_coin_window() {
+    let committee = Committee {
+        enable_fast_coin: true,
+        pending_commit_retention_waves: 1,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, _rx_primary) = channel(10);
+    let (tx_output, _rx_output) = channel(10);
+    let consensus = Consensus {
+        committee,
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs.clone(),
+    };
+    let state = State::new(genesis_certs);
+
+    let old_pending = consensus
+        .fast_coin_pending_commit_check_for_round(3, &state)
+        .expect("round 3 should open the first fast-coin leader window");
+    assert_eq!(old_pending.leader_round, 1);
+
+    let candidates = consensus.pending_commit_checks_for_round(7, &state);
+    let newest_leader_round = candidates
+        .iter()
+        .map(|candidate| candidate.leader_round)
+        .max()
+        .expect("round 7 should open the next fast-coin leader window");
+    assert_eq!(newest_leader_round, 5);
+
+    let oldest_retained = consensus.oldest_retained_leader_round(newest_leader_round);
+    assert_eq!(oldest_retained, 5);
+
+    let mut pending_commit_checks = vec![old_pending];
+    pending_commit_checks.retain(|pending| pending.leader_round >= oldest_retained);
+    assert!(
+        pending_commit_checks.is_empty(),
+        "one-wave retention should retire the older leader window once round 7 opens leader round 5"
+    );
+}
+
+#[test]
+fn retention_two_waves_keeps_previous_fast_coin_window() {
+    let committee = Committee {
+        enable_fast_coin: true,
+        pending_commit_retention_waves: 2,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, _rx_primary) = channel(10);
+    let (tx_output, _rx_output) = channel(10);
+    let consensus = Consensus {
+        committee,
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs.clone(),
+    };
+    let state = State::new(genesis_certs);
+
+    let old_pending = consensus
+        .fast_coin_pending_commit_check_for_round(3, &state)
+        .expect("round 3 should open the first fast-coin leader window");
+    assert_eq!(old_pending.leader_round, 1);
+
+    let candidates = consensus.pending_commit_checks_for_round(7, &state);
+    let newest_leader_round = candidates
+        .iter()
+        .map(|candidate| candidate.leader_round)
+        .max()
+        .expect("round 7 should open the next fast-coin leader window");
+    assert_eq!(newest_leader_round, 5);
+
+    let oldest_retained = consensus.oldest_retained_leader_round(newest_leader_round);
+    assert_eq!(oldest_retained, 1);
+
+    let mut pending_commit_checks = vec![old_pending];
+    pending_commit_checks.retain(|pending| pending.leader_round >= oldest_retained);
+    assert_eq!(
+        pending_commit_checks.len(),
+        1,
+        "two-wave retention should keep the previous fast-coin leader window alive"
+    );
+    assert_eq!(pending_commit_checks[0].leader_round, 1);
 }

@@ -293,6 +293,7 @@ def cloudlab_remote(
     enable_commit_recheck=True, # r2 commit  fast_coin_candidate_threshold 达到预期
     fast_coin_candidate_threshold=1,
     solid_candidate_threshold=1,
+    pending_commit_retention_waves=5, # pending commit 检查保留几个 leader window，1 表示当前行为
 
     # 这是payload 的调度，第三轮和第二轮的顶点接收payload，目前以第三轮顶点优先，多余的给第二轮
     enable_adaptive_intermediate_spill=True, # payload shceduling
@@ -348,6 +349,7 @@ def cloudlab_remote(
         'enable_commit_recheck': enable_commit_recheck,
         'fast_coin_candidate_threshold': int(fast_coin_candidate_threshold),
         'solid_candidate_threshold': int(solid_candidate_threshold),
+        'pending_commit_retention_waves': int(pending_commit_retention_waves),
         'enable_adaptive_intermediate_spill': enable_adaptive_intermediate_spill,
         'adaptive_intermediate_spill_trigger_digests': int(adaptive_intermediate_spill_trigger_digests),
         'adaptive_intermediate_spill_cap_digests': int(adaptive_intermediate_spill_cap_digests),

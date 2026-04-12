@@ -46,7 +46,8 @@ class Committee:
                  allow_cross_step_weak_edges=True, enable_fast_coin=False,
                  solid_commit_trigger_on_solid_step=False,
                  enable_commit_recheck=True, fast_coin_candidate_threshold=0,
-                 solid_candidate_threshold=0):
+                 solid_candidate_threshold=0,
+                 pending_commit_retention_waves=1):
         ''' The `addresses` field looks as follows:
             { 
                 "name": ["host", "host", ...],
@@ -77,6 +78,7 @@ class Committee:
             'enable_commit_recheck': enable_commit_recheck,
             'fast_coin_candidate_threshold': fast_coin_candidate_threshold,
             'solid_candidate_threshold': solid_candidate_threshold,
+            'pending_commit_retention_waves': pending_commit_retention_waves,
         }
         for name, hosts in addresses.items():
             host = hosts.pop(0)
@@ -172,7 +174,8 @@ class LocalCommittee(Committee):
                  allow_cross_step_weak_edges=True, enable_fast_coin=False,
                  solid_commit_trigger_on_solid_step=False,
                  enable_commit_recheck=True, fast_coin_candidate_threshold=0,
-                 solid_candidate_threshold=0):
+                 solid_candidate_threshold=0,
+                 pending_commit_retention_waves=1):
         assert isinstance(names, list)
         assert all(isinstance(x, str) for x in names)
         assert isinstance(port, int)
@@ -191,6 +194,7 @@ class LocalCommittee(Committee):
             enable_commit_recheck,
             fast_coin_candidate_threshold,
             solid_candidate_threshold,
+            pending_commit_retention_waves,
         )
 
 
@@ -219,6 +223,7 @@ class NodeParameters:
         optional_int_fields = [
             'adaptive_intermediate_spill_trigger_digests',
             'adaptive_intermediate_spill_cap_digests',
+            'pending_commit_retention_waves',
         ]
         for field in optional_int_fields:
             if field in json and not isinstance(json[field], int):

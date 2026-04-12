@@ -207,6 +207,12 @@ pub struct Consensus {
 }
 
 impl Consensus {
+    fn oldest_retained_leader_round(&self, newest_leader_round: Round) -> Round {
+        let retention_waves = self.committee.pending_commit_retention_waves.max(1) as u64;
+        let wave = self.committee.solid_wave_length().max(1);
+        newest_leader_round.saturating_sub((retention_waves - 1) * wave)
+    }
+
     pub fn spawn(
         committee: Committee,
         gc_depth: Round,
@@ -276,9 +282,11 @@ impl Consensus {
             if let Some(newest_leader_round) =
                 candidates.iter().map(|candidate| candidate.leader_round).max()
             {
+                let oldest_retained_leader_round =
+                    self.oldest_retained_leader_round(newest_leader_round);
                 let mut retired = Vec::new();
                 pending_commit_checks.retain(|pending| {
-                    let keep = pending.leader_round >= newest_leader_round;
+                    let keep = pending.leader_round >= oldest_retained_leader_round;
                     if !keep {
                         retired.push((pending.path, pending.leader_round, pending.support_round));
                     }
@@ -286,12 +294,13 @@ impl Consensus {
                 });
                 for (path, leader_round, support_round) in retired {
                     debug!(
-                        "Retiring pending commit check path={} leader_round={} support_round={} because newer leader window {} started at round {}",
+                        "Retiring pending commit check path={} leader_round={} support_round={} because newer leader window {} started at round {} (oldest retained leader window {})",
                         path.log_label(),
                         leader_round,
                         support_round,
                         newest_leader_round,
-                        round
+                        round,
+                        oldest_retained_leader_round
                     );
                 }
             }

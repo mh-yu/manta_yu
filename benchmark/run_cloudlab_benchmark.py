@@ -195,6 +195,8 @@ Examples:
                        help='Minimum number of leader-round vertices that must each gather f+1 support before fast coin starts leader selection')
     parser.add_argument('--solid-candidate-threshold', type=int, default=0,
                        help='Minimum number of leader-round vertices that must each gather f+1 support before the regular solid path starts leader selection')
+    parser.add_argument('--pending-commit-retention-waves', type=int, default=1,
+                       help='How many leader windows to keep pending commit checks before retiring them in favor of newer windows (default: 1)')
     parser.add_argument('--adaptive-intermediate-spill', dest='enable_adaptive_intermediate_spill',
                        action='store_true',
                        help='Enable critical-first routing and spill a small amount of payload to the intermediate queue only after the critical backlog grows')
@@ -249,6 +251,7 @@ Examples:
                 'enable_commit_recheck': args.enable_commit_recheck,
                 'fast_coin_candidate_threshold': args.fast_coin_candidate_threshold,
                 'solid_candidate_threshold': args.solid_candidate_threshold,
+                'pending_commit_retention_waves': args.pending_commit_retention_waves,
                 'enable_adaptive_intermediate_spill': args.enable_adaptive_intermediate_spill,
                 'adaptive_intermediate_spill_trigger_digests': args.adaptive_intermediate_spill_trigger_digests,
                 'adaptive_intermediate_spill_cap_digests': args.adaptive_intermediate_spill_cap_digests,

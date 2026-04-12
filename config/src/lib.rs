@@ -30,6 +30,10 @@ fn default_solid_candidate_threshold() -> usize {
     0
 }
 
+fn default_pending_commit_retention_waves() -> usize {
+    1
+}
+
 fn default_enable_adaptive_intermediate_spill() -> bool {
     false
 }
@@ -227,6 +231,10 @@ pub struct Committee {
     /// on the regular solid support round before the solid path starts leader selection.
     #[serde(default = "default_solid_candidate_threshold")]
     pub solid_candidate_threshold: usize,
+    /// Number of leader windows to keep pending commit checks alive before they
+    /// are retired in favor of newer windows. `1` preserves the current behavior.
+    #[serde(default = "default_pending_commit_retention_waves")]
+    pub pending_commit_retention_waves: usize,
     /// When true, enqueue solid-path commit checks as soon as the round after a solid-step
     /// support round is observed (legacy). When false (default), enqueue when the **first**
     /// certificate in round `solid_wave_length() + 1` arrives (round **5** when σ=κ=2), then the
@@ -511,6 +519,7 @@ mod tests {
             enable_commit_recheck: true,
             fast_coin_candidate_threshold: 0,
             solid_candidate_threshold: 0,
+            pending_commit_retention_waves: 1,
             solid_commit_trigger_on_solid_step: false,
         }
     }

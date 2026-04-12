@@ -280,6 +280,7 @@ class LogParser:
             ('Enable commit recheck', 'enable_commit_recheck'),
             ('Fast coin candidate threshold', 'fast_coin_candidate_threshold'),
             ('Solid candidate threshold', 'solid_candidate_threshold'),
+            ('Pending commit retention waves', 'pending_commit_retention_waves'),
             ('Enable adaptive intermediate spill', 'enable_adaptive_intermediate_spill'),
             (
                 'Adaptive intermediate spill trigger digests',
