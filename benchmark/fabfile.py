@@ -291,8 +291,8 @@ def cloudlab_remote(
     enable_fast_coin=True, # fast-coin commit 第二轮结束提交
     solid_commit_trigger_on_solid_step=True, # r3 commit 第三轮结束提交，在收到第一个第四轮证书后 + solid_candidate_threshold 达到预期
     enable_commit_recheck=True, # r2 commit  fast_coin_candidate_threshold 达到预期
-    fast_coin_candidate_threshold=1,
-    solid_candidate_threshold=1,
+    fast_coin_candidate_threshold=4,
+    solid_candidate_threshold=4,
 
     # 这是payload 的调度，第三轮和第二轮的顶点接收payload，目前以第三轮顶点优先，多余的给第二轮
     enable_adaptive_intermediate_spill=True, # payload shceduling
@@ -316,13 +316,13 @@ def cloudlab_remote(
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'rate': [40000,60000],
         # 'rate': [40000,60000],
-        # 'rate': [40000,80000,100000,120000,140000,150000,160000,180000],
+        # 'rate': [40000,60000],
+        'rate': [20000,40000,80000,60000,100000,120000,140000],
         # 'rate': [130000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 1,       
+        'runs': 2,       
     }
 
     # manta 对以下参数比较敏感 可调整成 50/500_000/50   100/500_000/100  50/128_000/50 80/128_000/35 等等
