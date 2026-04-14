@@ -121,7 +121,7 @@ impl Proposer {
             .map(|authority| authority.workers.len())
             .unwrap_or(1);
         // Disable the parent grace delay so newly unlocked rounds can be proposed immediately.
-        let parent_grace_delay_ms = 100;
+        let parent_grace_delay_ms = 250;
 
         let mut unlocked_rounds = HashMap::new();
         unlocked_rounds.insert(
