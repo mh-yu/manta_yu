@@ -300,7 +300,7 @@ def cloudlab_remote(
     adaptive_intermediate_spill_cap_digests=1,
 
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
-    design_tag='manta_cert2',
+    design_tag='manta_debug',
     network_tag='geo631',
     load_tag='balanced_50_50',
 ):
@@ -318,11 +318,11 @@ def cloudlab_remote(
         'rate_type': 'balanced',
         # 'rate': [40000,60000],
         # 'rate': [40000,60000],
-        'rate': [20000,40000,80000,60000,100000,120000,140000],
+        'rate': [100000],
         # 'rate': [130000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 2,       
+        'runs': 1,       
     }
 
     # manta 对以下参数比较敏感 可调整成 50/500_000/50   100/500_000/100  50/128_000/50 80/128_000/35 等等
@@ -331,12 +331,12 @@ def cloudlab_remote(
     #  'batch_size': 500_000,  # bytes
     # 'max_batch_delay': 35,  # ms
     node_params = {
-        'header_size': 1_000,  # bytes
+        'header_size': 1000,  # bytes
         'max_header_delay': 50,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
-        'batch_size': 500000,  # bytes
+        'batch_size': 100000,  # bytes
         'max_batch_delay': 50,  # ms
         'sigma': sigma,
         'kappa': kappa,

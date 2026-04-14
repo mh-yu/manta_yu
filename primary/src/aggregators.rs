@@ -63,6 +63,12 @@ pub struct CertificatesAggregator {
     expected_round: Round,
     weight: Stake,
     certificates: Vec<Digest>,
+    /// Parents that are in the strong/regular-weak window and must be preserved
+    /// to keep the same processing-threshold semantics.
+    preserved_parents: Vec<Digest>,
+    /// Cross-step weak parents are optional for processing-threshold checks; we
+    /// keep only the best-scoring ones when constructing `ProposalParents`.
+    cross_step_weak_candidates: Vec<CrossStepWeakParent>,
     weak_certificates: Vec<Digest>,
     used: HashSet<PublicKey>,
     has_quorum: bool,
@@ -83,12 +89,21 @@ pub struct CertificatesAggregator {
     back_link_author_bitmap: Vec<u8>,
 }
 
+#[derive(Clone)]
+struct CrossStepWeakParent {
+    digest: Digest,
+    round: Round,
+    ancestry_score: usize,
+}
+
 impl CertificatesAggregator {
     pub fn new(expected_round: Round) -> Self {
         Self {
             expected_round,
             weight: 0,
             certificates: Vec::new(),
+            preserved_parents: Vec::new(),
+            cross_step_weak_candidates: Vec::new(),
             weak_certificates: Vec::new(),
             used: HashSet::new(),
             has_quorum: false,
@@ -100,6 +115,80 @@ impl CertificatesAggregator {
             back_link_target_round: 0,
             back_link_author_bitmap: Vec::new(),
         }
+    }
+
+    fn bitmap_popcount(bitmap: &[u8]) -> usize {
+        bitmap.iter().map(|byte| byte.count_ones() as usize).sum()
+    }
+
+    fn cross_step_weak_parent_score(certificate: &Certificate, target_round: Round) -> usize {
+        let direct_tracked_round_hit =
+            usize::from(target_round > 0 && certificate.round() == target_round);
+        let back_link_hits =
+            if target_round > 0 && certificate.header.wave_back_link_target_round == target_round {
+                Self::bitmap_popcount(&certificate.header.wave_back_link_author_bitmap)
+            } else {
+                0
+            };
+        let wave_coverage = if certificate.header.solid_wave_vertices_merged.is_empty() {
+            certificate.header.solid_wave_vertices.len()
+        } else {
+            certificate.header.solid_wave_vertices_merged.len()
+        };
+        let step_coverage = if certificate.header.solid_step_vertices_merged.is_empty() {
+            certificate.header.solid_step_vertices.len()
+        } else {
+            certificate.header.solid_step_vertices_merged.len()
+        };
+
+        // Lexicographic priority: direct tracked-round ancestry > backlink coverage
+        // > wave coverage > step coverage.
+        direct_tracked_round_hit * 1_000_000
+            + back_link_hits * 10_000
+            + wave_coverage * 100
+            + step_coverage
+    }
+
+    fn cross_step_weak_budget(&self, committee: &Committee) -> usize {
+        let validity = committee.validity_threshold() as usize;
+        let candidate_gate = committee
+            .fast_coin_candidate_threshold
+            .max(committee.solid_candidate_threshold);
+        validity.max(candidate_gate).max(1) * 2
+    }
+
+    fn prioritized_parent_set(&self, committee: &Committee) -> Vec<Digest> {
+        let mut parents = self.preserved_parents.clone();
+        let weak_budget = self.cross_step_weak_budget(committee);
+
+        if weak_budget == 0 || self.cross_step_weak_candidates.is_empty() {
+            return parents;
+        }
+
+        let mut candidates = self.cross_step_weak_candidates.clone();
+        candidates.sort_by(|a, b| {
+            b.ancestry_score
+                .cmp(&a.ancestry_score)
+                .then_with(|| b.round.cmp(&a.round))
+                .then_with(|| a.digest.to_vec().cmp(&b.digest.to_vec()))
+        });
+
+        let selected = candidates.len().min(weak_budget);
+        debug!(
+            "Round {} parent selection: preserving {} strong/regular parents, selecting {}/{} cross-step weak parents",
+            self.expected_round + 1,
+            self.preserved_parents.len(),
+            selected,
+            candidates.len()
+        );
+
+        parents.extend(
+            candidates
+                .into_iter()
+                .take(weak_budget)
+                .map(|candidate| candidate.digest),
+        );
+        parents
     }
 
     /// Returns the last computed union of parents' solid_step_vertices_merged
@@ -114,8 +203,13 @@ impl CertificatesAggregator {
             self.solid_step_union
                 .extend(certificate.header.solid_step_vertices.iter().cloned());
         } else {
-            self.solid_step_union
-                .extend(certificate.header.solid_step_vertices_merged.iter().cloned());
+            self.solid_step_union.extend(
+                certificate
+                    .header
+                    .solid_step_vertices_merged
+                    .iter()
+                    .cloned(),
+            );
         }
     }
 
@@ -124,8 +218,13 @@ impl CertificatesAggregator {
             self.solid_wave_union
                 .extend(certificate.header.solid_wave_vertices.iter().cloned());
         } else {
-            self.solid_wave_union
-                .extend(certificate.header.solid_wave_vertices_merged.iter().cloned());
+            self.solid_wave_union.extend(
+                certificate
+                    .header
+                    .solid_wave_vertices_merged
+                    .iter()
+                    .cloned(),
+            );
         }
     }
 
@@ -176,29 +275,39 @@ impl CertificatesAggregator {
         let back_link_target_round = committee
             .wave_back_link_tracking_round(current_round)
             .unwrap_or(0);
+        let certificate_digest = certificate.digest();
+        let certificate_round = certificate.round();
 
         // Add the certificate to the appropriate list.
-        if certificate.round() == self.expected_round {
-            self.certificates.push(certificate.digest());
+        if certificate_round == self.expected_round {
+            self.certificates.push(certificate_digest.clone());
+            self.preserved_parents.push(certificate_digest);
             self.extend_step_union(&certificate);
             self.extend_wave_union(&certificate);
             self.back_link_target_round = back_link_target_round;
             self.extend_back_link_bitmap(&certificate, committee, back_link_target_round);
             self.weight += committee.stake(&origin);
-        } else if certificate.round() >= regular_weak_start
-            && certificate.round() < self.expected_round
+        } else if certificate_round >= regular_weak_start && certificate_round < self.expected_round
         {
-            self.certificates.push(certificate.digest());
-            self.weak_certificates.push(certificate.digest());
+            self.certificates.push(certificate_digest.clone());
+            self.weak_certificates.push(certificate_digest.clone());
+            self.preserved_parents.push(certificate_digest);
             self.extend_step_union(&certificate);
             self.extend_wave_union(&certificate);
             self.back_link_target_round = back_link_target_round;
             self.extend_back_link_bitmap(&certificate, committee, back_link_target_round);
-        } else if certificate.round() >= cross_step_weak_start
-            && certificate.round() < regular_weak_start
+        } else if certificate_round >= cross_step_weak_start
+            && certificate_round < regular_weak_start
         {
-            self.certificates.push(certificate.digest());
-            self.weak_certificates.push(certificate.digest());
+            let ancestry_score =
+                Self::cross_step_weak_parent_score(&certificate, back_link_target_round);
+            self.certificates.push(certificate_digest.clone());
+            self.weak_certificates.push(certificate_digest.clone());
+            self.cross_step_weak_candidates.push(CrossStepWeakParent {
+                digest: certificate_digest,
+                round: certificate_round,
+                ancestry_score,
+            });
             self.extend_wave_union(&certificate);
             self.back_link_target_round = back_link_target_round;
             self.extend_back_link_bitmap(&certificate, committee, back_link_target_round);
@@ -222,9 +331,8 @@ impl CertificatesAggregator {
         );
         if is_solid_step {
             self.last_union_set = Some(self.solid_step_union.iter().cloned().collect());
-            self.has_quorum =
-                self.solid_step_union.len()
-                    >= committee.processing_threshold(current_round) as usize;
+            self.has_quorum = self.solid_step_union.len()
+                >= committee.processing_threshold(current_round) as usize;
             debug!(
                 "Current round: {}, The number of merged solid-step vertices is {}",
                 current_round,
@@ -252,7 +360,8 @@ impl CertificatesAggregator {
             if self.quorum_reached_time.is_none() {
                 self.quorum_reached_time = Some(Instant::now());
             }
-            let mut proposal_parents = ProposalParents::from(self.certificates.clone());
+            let mut proposal_parents =
+                ProposalParents::from(self.prioritized_parent_set(committee));
             proposal_parents.solid_step_union = self.solid_step_union.clone();
             proposal_parents.solid_wave_union = self.solid_wave_union.clone();
             proposal_parents.wave_back_link_target_round = self.back_link_target_round;
