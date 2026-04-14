@@ -360,8 +360,9 @@ impl CertificatesAggregator {
             if self.quorum_reached_time.is_none() {
                 self.quorum_reached_time = Some(Instant::now());
             }
-            let mut proposal_parents =
-                ProposalParents::from(self.prioritized_parent_set(committee));
+            // Keep all collected parents to maximize ancestry/backtracking coverage.
+            // This also preserves consistency with the precomputed back-link bitmap.
+            let mut proposal_parents = ProposalParents::from(self.certificates.clone());
             proposal_parents.solid_step_union = self.solid_step_union.clone();
             proposal_parents.solid_wave_union = self.solid_wave_union.clone();
             proposal_parents.wave_back_link_target_round = self.back_link_target_round;
