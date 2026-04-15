@@ -296,7 +296,7 @@ def cloudlab_remote(
 
     # 这是payload 的调度，第三轮和第二轮的顶点接收payload，目前以第三轮顶点优先，多余的给第二轮
     enable_adaptive_intermediate_spill=True, # payload shceduling
-    adaptive_intermediate_spill_trigger_digests=5,
+    adaptive_intermediate_spill_trigger_digests=2,
     adaptive_intermediate_spill_cap_digests=1,
 
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
@@ -316,9 +316,9 @@ def cloudlab_remote(
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'rate': [120000],
-        # 'rate': [40000,60000],
-        # 'rate': [40000, 60000, 80000, 100000, 120000, 130000, 140000],
+        # 'rate': [80000],
+        'rate': [12000,80000,120000],
+        # 'rate': [40000, 60000, 80000, 100000, 120000, 140000],
         # 'rate': [130000],
         'tx_size': 512,
         'duration': 120,
@@ -332,7 +332,7 @@ def cloudlab_remote(
     # 'max_batch_delay': 35,  # ms
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 50,  # ms
+        'max_header_delay': 100,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
