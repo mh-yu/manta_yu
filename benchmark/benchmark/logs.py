@@ -2,7 +2,9 @@
 from datetime import datetime
 from glob import glob
 from multiprocessing import Pool
+from os import makedirs
 from os.path import join
+from os.path import dirname
 from re import findall, search
 from statistics import mean
 
@@ -15,13 +17,16 @@ class ParseError(Exception):
 
 class LogParser:
     def __init__(self, clients, primaries, workers, faults=0,
-                 default_client_size=None, default_client_rates=None):
+                 default_client_size=None, default_client_rates=None,
+                 design_tag=None, network_tag=None):
         inputs = [clients, primaries, workers]
         assert all(isinstance(x, list) for x in inputs)
         assert all(isinstance(x, str) for y in inputs for x in y)
         assert all(x for x in inputs)
 
         self.faults = faults
+        self.design_tag = design_tag
+        self.network_tag = network_tag
         if isinstance(faults, int):
             self.committee_size = len(primaries) + int(faults)
             self.workers =  len(workers) // len(primaries)
@@ -226,6 +231,8 @@ class LogParser:
             ' SUMMARY:\n'
             '-----------------------------------------\n'
             ' + CONFIG:\n'
+            f' Design tag: {self.design_tag or "N/A"}\n'
+            f' Network tag: {self.network_tag or "N/A"}\n'
             f' Faults: {self.faults} node(s)\n'
             f' Committee size: {self.committee_size} node(s)\n'
             f' Worker(s) per node: {self.workers} worker(s)\n'
@@ -255,12 +262,15 @@ class LogParser:
 
     def print(self, filename):
         assert isinstance(filename, str)
+        parent = dirname(filename)
+        if parent:
+            makedirs(parent, exist_ok=True)
         with open(filename, 'a') as f:
             f.write(self.result())
 
     @classmethod
     def process(cls, directory, faults=0, default_client_size=None,
-                default_client_rates=None):
+                default_client_rates=None, design_tag=None, network_tag=None):
         assert isinstance(directory, str)
 
         clients = []
@@ -283,4 +293,6 @@ class LogParser:
             faults=faults,
             default_client_size=default_client_size,
             default_client_rates=default_client_rates,
+            design_tag=design_tag,
+            network_tag=network_tag,
         )

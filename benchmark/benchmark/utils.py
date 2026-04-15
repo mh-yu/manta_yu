@@ -65,9 +65,23 @@ class PathMaker:
         return 'results'
 
     @staticmethod
-    def result_file(faults, nodes, workers, collocate, rate, tx_size):
+    def result_file(
+        faults,
+        nodes,
+        workers,
+        collocate,
+        rate,
+        tx_size,
+        design_tag=None,
+        network_tag=None,
+    ):
+        parts = [PathMaker.results_path()]
+        if design_tag:
+            parts.append(design_tag)
+        if network_tag:
+            parts.append(network_tag)
         return join(
-            PathMaker.results_path(),
+            *parts,
             f'bench-{faults}-{nodes}-{workers}-{collocate}-{rate}-{tx_size}.txt'
         )
 

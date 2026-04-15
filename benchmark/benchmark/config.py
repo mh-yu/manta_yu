@@ -195,6 +195,19 @@ class NodeParameters:
 class BenchParameters:
     def __init__(self, json):
         try:
+            def parse_tag(name):
+                value = json.get(name)
+                if value is None:
+                    return None
+                value = str(value).strip()
+                if not value:
+                    return None
+                if '/' in value or '\\' in value:
+                    raise ConfigError(
+                        f'Invalid {name}: path separators are not allowed'
+                    )
+                return value
+
             self.faults = int(json['faults'])
 
             nodes = json['nodes']
@@ -223,6 +236,8 @@ class BenchParameters:
             self.duration = int(json['duration'])
 
             self.runs = int(json['runs']) if 'runs' in json else 1
+            self.design_tag = parse_tag('design_tag')
+            self.network_tag = parse_tag('network_tag')
         except KeyError as e:
             raise ConfigError(f'Malformed bench parameters: missing key {e}')
 

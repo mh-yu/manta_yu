@@ -362,6 +362,8 @@ class Bench:
                             bench_parameters.collocate,
                             r, 
                             bench_parameters.tx_size, 
+                            design_tag=bench_parameters.design_tag,
+                            network_tag=bench_parameters.network_tag,
                         ))
                     except (subprocess.SubprocessError, GroupException, ParseError) as e:
                         self.kill(hosts=selected_hosts)
