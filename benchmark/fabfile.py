@@ -239,10 +239,10 @@ def cloudlab_install(ctx):
 
 
 @task
-def cloudlab_wan(ctx, action='setup'):
+def cloudlab_wan(ctx, action='setup', settings_file='cloudlab_settings.json'):
     ''' Emulate WAN RTT between sites (tc netem). action=setup|clear '''
     try:
-        w = CloudLabWan()
+        w = CloudLabWan(settings_file)
         act = (action or 'setup').lower()
         if act == 'setup':
             w.setup()
@@ -255,12 +255,12 @@ def cloudlab_wan(ctx, action='setup'):
 
 
 @task
-def cloudlab_lan(ctx, prefix_len=24, cross_subnet_via='', action='setup'):
+def cloudlab_lan(ctx, prefix_len=24, cross_subnet_via='', action='setup', settings_file='cloudlab_settings.json'):
     ''' Cross-subnet static routes on CloudLab nodes. action=setup|clear|verify. Optional cross_subnet_via=GATEWAY_IP '''
     try:
         via = cross_subnet_via.strip() or None
         plen = int(prefix_len)
-        lan = CloudLabLan()
+        lan = CloudLabLan(settings_file)
         act = (action or 'setup').lower()
         if act == 'clear':
             lan.clear(prefix_len=plen, cross_subnet_via=via)
@@ -277,17 +277,17 @@ def cloudlab_lan(ctx, prefix_len=24, cross_subnet_via='', action='setup'):
 
 
 @task
-def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3):
+def cloudlab_remote(ctx, debug=False, sigma=1, kappa=2):
     ''' Run benchmarks on CloudLab '''
     bench_params = {
         'faults': 0,
         'nodes': [10],
         'workers': 1,
         'collocate': True,
-        'design_tag': 'dag_rider_data_forpaper',
-        'network_tag': 'geo',
+        'design_tag': 'tusk_data_forpaper',
+        'network_tag': '80ms',
         'rate_type': 'balanced',
-        'rate': [160000],
+        'rate': [40000,60000,80000,100000,120000,140000,160000],
         'tx_size': 512,
         'duration': 120,
         'runs': 2,
@@ -301,7 +301,7 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3):
         'batch_size': 500_000,  # bytes
         'max_batch_delay': 200,  # ms
         'sigma': 1,
-        'kappa': 3,
+        'kappa': 2,
         'reference': 4,
         'coverage': 7,
         's': 0.99,
