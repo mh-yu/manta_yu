@@ -277,17 +277,17 @@ def cloudlab_lan(ctx, prefix_len=24, cross_subnet_via='', action='setup'):
 
 
 @task
-def cloudlab_remote(ctx, debug=False, sigma=1, kappa=2):
+def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3):
     ''' Run benchmarks on CloudLab '''
     bench_params = {
         'faults': 0,
         'nodes': [10],
         'workers': 1,
         'collocate': True,
-        'design_tag': 'tusk_data_forpaper',
+        'design_tag': 'dag_rider_data_forpaper',
         'network_tag': 'geo',
         'rate_type': 'balanced',
-        'rate': [40000,60000,80000,100000,120000,140000],
+        'rate': [160000],
         'tx_size': 512,
         'duration': 120,
         'runs': 2,
@@ -301,7 +301,7 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=2):
         'batch_size': 500_000,  # bytes
         'max_batch_delay': 200,  # ms
         'sigma': 1,
-        'kappa': 2,
+        'kappa': 3,
         'reference': 4,
         'coverage': 7,
         's': 0.99,
