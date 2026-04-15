@@ -11,7 +11,7 @@ from copy import deepcopy
 import subprocess
 
 from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError
-from benchmark.utils import BenchError, Print, PathMaker, progress_bar
+from benchmark.utils import BenchError, Print, PathMaker, progress_bar, write_failure_summary
 from benchmark.commands import CommandMaker
 from benchmark.logs import LogParser, ParseError
 from benchmark.instance import InstanceManager
@@ -348,6 +348,17 @@ class Bench:
                 # Run the benchmark.
                 for i in range(bench_parameters.runs):
                     Print.heading(f'Run {i+1}/{bench_parameters.runs}')
+                    summary_file = PathMaker.summary_file(
+                        bench_parameters.faults,
+                        n,
+                        bench_parameters.workers,
+                        bench_parameters.collocate,
+                        r,
+                        bench_parameters.tx_size,
+                        i + 1,
+                        design_tag=bench_parameters.design_tag,
+                        network_tag=bench_parameters.network_tag,
+                    )
                     try:
                         self._run_single(
                             r, committee_copy, bench_parameters, debug
@@ -355,20 +366,23 @@ class Bench:
 
                         faults = bench_parameters.faults
                         logger = self._logs(committee_copy, faults)
-                        logger.print(PathMaker.summary_file(
-                            faults,
-                            n, 
-                            bench_parameters.workers,
-                            bench_parameters.collocate,
-                            r, 
-                            bench_parameters.tx_size,
-                            i + 1,
-                            design_tag=bench_parameters.design_tag,
-                            network_tag=bench_parameters.network_tag,
-                        ))
+                        logger.print(summary_file)
                     except (subprocess.SubprocessError, GroupException, ParseError) as e:
                         self.kill(hosts=selected_hosts)
                         if isinstance(e, GroupException):
                             e = FabricError(e)
+                        write_failure_summary(
+                            summary_file,
+                            design_tag=bench_parameters.design_tag,
+                            network_tag=bench_parameters.network_tag,
+                            faults=bench_parameters.faults,
+                            nodes=n,
+                            workers=bench_parameters.workers,
+                            collocate=bench_parameters.collocate,
+                            rate=r,
+                            tx_size=bench_parameters.tx_size,
+                            run=i + 1,
+                            error=str(e),
+                        )
                         Print.error(BenchError('Benchmark failed', e))
                         continue

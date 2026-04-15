@@ -70,24 +70,13 @@ def process_logs(faults=0, save_to_file=False):
         Print.error(f'Logs directory not found: {logs_dir}')
         return False
     
-    Print.info('=' * 60)
-    Print.info('Processing logs...')
-    Print.info('=' * 60)
-    
     try:
         parser = LogParser.process(logs_dir, faults=faults)
         result = parser.result()
         
         # Print results
         print(result)
-        
-        # Export latency CSV
-        csv_file = parser.export_latency_csv()
-        if csv_file:
-            Print.info(f'Latency CSV exported to: {csv_file}')
-        else:
-            Print.warn('Failed to export latency CSV (no latency data available)')
-        
+
         return True
         
     except ParseError as e:
@@ -135,9 +124,6 @@ Examples:
     
     args = parser.parse_args()
     
-    Print.heading('CloudLab Benchmark Runner')
-    Print.info('=' * 60)
-    
     success = True
     
     # Step 1: Run benchmark (unless skipped)
@@ -153,19 +139,12 @@ Examples:
         # Download-only mode
         Print.info('Download-only mode: downloading logs from remote nodes...')
         download_logs_if_needed(args.settings, args.max_workers)
-        Print.info('Download complete. Exiting.')
         return 0
     
     # Step 3: Process logs
     success = process_logs(faults=args.faults, save_to_file=False) and success
     
-    Print.info('=' * 60)
-    if success:
-        Print.info('✓ All operations completed successfully')
-        return 0
-    else:
-        Print.warn('⚠ Some operations completed with errors')
-        return 1
+    return 0 if success else 1
 
 if __name__ == '__main__':
     sys.exit(main())

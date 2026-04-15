@@ -19,7 +19,7 @@ import re
 import shlex
 
 from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError
-from benchmark.utils import BenchError, Print, PathMaker
+from benchmark.utils import BenchError, Print, PathMaker, write_failure_summary
 from benchmark.commands import CommandMaker
 from benchmark.logs import LogParser, ParseError
 from benchmark.cloudlab_instance import CloudLabInstanceManager
@@ -1545,6 +1545,17 @@ SCRIPTEOF'''
                     for run in range(bench_parameters.runs):
                         attack_str = f", attack={'ON' if trigger_attack else 'OFF'}" if trigger_attack is not None else ""
                         Print.heading(f'\nRunning benchmark: nodes={n}, rate={rate}{attack_str}, run={run+1}/{bench_parameters.runs}')
+                        summary_file = PathMaker.summary_file(
+                            bench_parameters.faults,
+                            n,
+                            bench_parameters.workers,
+                            bench_parameters.collocate,
+                            rate,
+                            bench_parameters.tx_size,
+                            run + 1,
+                            design_tag=bench_parameters.design_tag,
+                            network_tag=bench_parameters.network_tag,
+                        )
                         
                         try:
                             # Run the actual benchmark
@@ -1554,21 +1565,24 @@ SCRIPTEOF'''
                             
                             # Download and parse logs
                             result = self._logs(committee_copy, bench_parameters.faults, max_workers=bench_parameters.workers)
-                            result.print(PathMaker.summary_file(
-                                bench_parameters.faults,
-                                n,
-                                bench_parameters.workers,
-                                bench_parameters.collocate,
-                                rate,
-                                bench_parameters.tx_size,
-                                run + 1,
-                                design_tag=bench_parameters.design_tag,
-                                network_tag=bench_parameters.network_tag,
-                            ))
+                            result.print(summary_file)
                         except (subprocess.SubprocessError, GroupException, ParseError) as e:
                             self.kill(hosts=selected_hosts)
                             if isinstance(e, GroupException):
                                 e = FabricError(e)
+                            write_failure_summary(
+                                summary_file,
+                                design_tag=bench_parameters.design_tag,
+                                network_tag=bench_parameters.network_tag,
+                                faults=bench_parameters.faults,
+                                nodes=n,
+                                workers=bench_parameters.workers,
+                                collocate=bench_parameters.collocate,
+                                rate=rate,
+                                tx_size=bench_parameters.tx_size,
+                                run=run + 1,
+                                error=str(e),
+                            )
                             Print.error(BenchError('Benchmark failed', e))
                             continue
         

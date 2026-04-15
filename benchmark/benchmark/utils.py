@@ -1,6 +1,8 @@
 # Copyright(C) Facebook, Inc. and its affiliates.
 from datetime import datetime
+from os import makedirs
 from os.path import join
+from os.path import dirname
 
 
 class BenchError(Exception):
@@ -158,6 +160,51 @@ class Print:
         causes += [f'  {len(causes)}: {type(current_cause)}\n']
         causes += [f'  {len(causes)}: {current_cause}\n']
         print(f'Caused by: \n{"".join(causes)}\n')
+
+
+def write_failure_summary(
+    filename,
+    *,
+    design_tag,
+    network_tag,
+    faults,
+    nodes,
+    workers,
+    collocate,
+    rate,
+    tx_size,
+    run,
+    error,
+):
+    assert isinstance(filename, str)
+    parent = dirname(filename)
+    if parent:
+        makedirs(parent, exist_ok=True)
+
+    content = (
+        '\n'
+        '-----------------------------------------\n'
+        ' SUMMARY:\n'
+        '-----------------------------------------\n'
+        ' + CONFIG:\n'
+        f' Design tag: {design_tag or "N/A"}\n'
+        f' Network tag: {network_tag or "N/A"}\n'
+        f' Faults: {faults} node(s)\n'
+        f' Committee size: {nodes} node(s)\n'
+        f' Worker(s) per node: {workers} worker(s)\n'
+        f' Collocate primary and workers: {collocate}\n'
+        f' Input rate: {rate:,} tx/s\n'
+        f' Transaction size: {tx_size:,} B\n'
+        f' Run: {run}\n'
+        '\n'
+        ' + RESULTS:\n'
+        ' Status: FAILED\n'
+        f' Error: {error}\n'
+        '-----------------------------------------\n'
+    )
+
+    with open(filename, 'w') as f:
+        f.write(content)
 
 
 def progress_bar(iterable, prefix='', suffix='', decimals=1, length=30, fill='█', print_end='\r'):
