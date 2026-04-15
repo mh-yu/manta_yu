@@ -1,4 +1,5 @@
 # Copyright(C) Facebook, Inc. and its affiliates.
+from datetime import datetime
 from os.path import join
 
 
@@ -11,6 +12,12 @@ class BenchError(Exception):
 
 
 class PathMaker:
+    @staticmethod
+    def _tag_segment(value, default):
+        value = str(value).strip() if value is not None else ''
+        value = value.replace(' ', '_')
+        return value or default
+
     @staticmethod
     def binary_path():
         return join('..', 'target', 'release')
@@ -65,24 +72,35 @@ class PathMaker:
         return 'results'
 
     @staticmethod
-    def result_file(
+    def summary_path(design_tag=None, network_tag=None):
+        return join(
+            PathMaker._tag_segment(design_tag, 'untagged_design'),
+            PathMaker._tag_segment(network_tag, 'untagged_network'),
+        )
+
+    @staticmethod
+    def summary_file(
         faults,
         nodes,
         workers,
         collocate,
         rate,
         tx_size,
+        run,
         design_tag=None,
         network_tag=None,
+        timestamp=None,
     ):
-        parts = [PathMaker.results_path()]
-        if design_tag:
-            parts.append(design_tag)
-        if network_tag:
-            parts.append(network_tag)
+        design_segment = PathMaker._tag_segment(design_tag, 'untagged_design')
+        network_segment = PathMaker._tag_segment(network_tag, 'untagged_network')
+        stamp = timestamp or datetime.now().strftime('%Y%m%d_%H%M%S')
         return join(
-            *parts,
-            f'bench-{faults}-{nodes}-{workers}-{collocate}-{rate}-{tx_size}.txt'
+            PathMaker.summary_path(design_segment, network_segment),
+            (
+                f'summary_design-{design_segment}_network-{network_segment}'
+                f'_f{faults}_n{nodes}_w{workers}_c{collocate}'
+                f'_r{rate}_tx{tx_size}_run{run}_{stamp}.txt'
+            ),
         )
 
     @staticmethod

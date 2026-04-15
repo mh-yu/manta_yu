@@ -355,13 +355,14 @@ class Bench:
 
                         faults = bench_parameters.faults
                         logger = self._logs(committee_copy, faults)
-                        logger.print(PathMaker.result_file(
+                        logger.print(PathMaker.summary_file(
                             faults,
                             n, 
                             bench_parameters.workers,
                             bench_parameters.collocate,
                             r, 
-                            bench_parameters.tx_size, 
+                            bench_parameters.tx_size,
+                            i + 1,
                             design_tag=bench_parameters.design_tag,
                             network_tag=bench_parameters.network_tag,
                         ))

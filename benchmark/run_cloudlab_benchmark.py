@@ -9,7 +9,6 @@ import os
 import subprocess
 import argparse
 from pathlib import Path
-from datetime import datetime
 
 # Add benchmark directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -63,7 +62,7 @@ def download_logs_if_needed(settings_file='cloudlab_settings.json', max_workers=
         Print.warn('download_logs.py not found, skipping download')
         return False
 
-def process_logs(faults=0, save_to_file=True):
+def process_logs(faults=0, save_to_file=False):
     """Process and display log results"""
     logs_dir = PathMaker.logs_path()
     
@@ -81,21 +80,6 @@ def process_logs(faults=0, save_to_file=True):
         
         # Print results
         print(result)
-        
-        # Save to file
-        if save_to_file:
-            results_dir = Path(PathMaker.results_path())
-            results_dir.mkdir(parents=True, exist_ok=True)
-            
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            result_file = results_dir / f'benchmark_result_{timestamp}.txt'
-            
-            with open(result_file, 'w') as f:
-                f.write(f'Benchmark Results - {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
-                f.write('=' * 60 + '\n')
-                f.write(result)
-            
-            Print.info(f'\nResults saved to: {result_file}')
         
         # Export latency CSV
         csv_file = parser.export_latency_csv()
@@ -173,10 +157,7 @@ Examples:
         return 0
     
     # Step 3: Process logs
-    if not args.no_save:
-        success = process_logs(faults=args.faults, save_to_file=True) and success
-    else:
-        success = process_logs(faults=args.faults, save_to_file=False) and success
+    success = process_logs(faults=args.faults, save_to_file=False) and success
     
     Print.info('=' * 60)
     if success:

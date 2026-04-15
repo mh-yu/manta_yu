@@ -1554,13 +1554,14 @@ SCRIPTEOF'''
                             
                             # Download and parse logs
                             result = self._logs(committee_copy, bench_parameters.faults, max_workers=bench_parameters.workers)
-                            result.print(PathMaker.result_file(
+                            result.print(PathMaker.summary_file(
                                 bench_parameters.faults,
                                 n,
                                 bench_parameters.workers,
                                 bench_parameters.collocate,
                                 rate,
                                 bench_parameters.tx_size,
+                                run + 1,
                                 design_tag=bench_parameters.design_tag,
                                 network_tag=bench_parameters.network_tag,
                             ))

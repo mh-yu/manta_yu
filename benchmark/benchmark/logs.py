@@ -265,7 +265,7 @@ class LogParser:
         parent = dirname(filename)
         if parent:
             makedirs(parent, exist_ok=True)
-        with open(filename, 'a') as f:
+        with open(filename, 'w') as f:
             f.write(self.result())
 
     @classmethod
