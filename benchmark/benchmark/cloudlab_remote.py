@@ -319,7 +319,7 @@ class CloudLabBench:
             # Add cargo to PATH permanently
             'echo "export PATH=\\$HOME/.cargo/bin:\\$PATH" >> $HOME/.bashrc',
             'echo "export PATH=\\$HOME/.cargo/bin:\\$PATH" >> $HOME/.profile',
-            f'(git clone {self.settings.repo_url} || (cd {self.settings.repo_name} ; git pull))',
+            f'(git clone {self.settings.repo_url} {self.settings.repo_name} || (cd {self.settings.repo_name} ; git pull))',
             f'cd {self.settings.repo_name}/benchmark && pip3 install -r requirements.txt'
         ]
         
@@ -1718,4 +1718,3 @@ SCRIPTEOF'''
                             continue
         
         Print.heading('All benchmarks completed')
-

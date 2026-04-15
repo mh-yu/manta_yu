@@ -1,6 +1,6 @@
 network_tag: geo631-wait
 rtt_tag: 631
-run_index: 1/1
+run_index: 2/2
 nodes: 10
 rate: 40000
 workers: 1
@@ -31,11 +31,11 @@ trigger_attack: N/A
  Max batch delay: 50 ms
 
  + RESULTS:
- Consensus TPS: 39,810 tx/s
- Consensus BPS: 20,382,575 B/s
- Consensus latency: 765 ms
+ Consensus TPS: 38,514 tx/s
+ Consensus BPS: 19,718,981 B/s
+ Consensus latency: 938 ms
 
- End-to-end TPS: 39,608 tx/s
- End-to-end BPS: 20,279,287 B/s
- End-to-end latency: 1,282 ms
+ End-to-end TPS: 38,229 tx/s
+ End-to-end BPS: 19,573,430 B/s
+ End-to-end latency: 1,698 ms
 -----------------------------------------

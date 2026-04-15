@@ -1,8 +1,8 @@
 network_tag: geo631-wait
 rtt_tag: 631
-run_index: 1/1
+run_index: 1/2
 nodes: 10
-rate: 60000
+rate: 80000
 workers: 1
 faults: 0
 collocate: True
@@ -18,7 +18,7 @@ trigger_attack: N/A
  Committee size: 10 node(s)
  Worker(s) per node: 1 worker(s)
  Collocate primary and workers: True
- Input rate: 60,000 tx/s
+ Input rate: 80,000 tx/s
  Transaction size: 512 B
  Execution time: 121 s
 
@@ -31,11 +31,11 @@ trigger_attack: N/A
  Max batch delay: 50 ms
 
  + RESULTS:
- Consensus TPS: 59,549 tx/s
- Consensus BPS: 30,488,872 B/s
- Consensus latency: 788 ms
+ Consensus TPS: 78,911 tx/s
+ Consensus BPS: 40,402,531 B/s
+ Consensus latency: 910 ms
 
- End-to-end TPS: 59,181 tx/s
- End-to-end BPS: 30,300,791 B/s
- End-to-end latency: 1,750 ms
+ End-to-end TPS: 78,432 tx/s
+ End-to-end BPS: 40,157,263 B/s
+ End-to-end latency: 3,476 ms
 -----------------------------------------
