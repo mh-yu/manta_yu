@@ -317,7 +317,7 @@ def cloudlab_remote(
         'collocate': True,
         'rate_type': 'balanced',
         # 'rate': [80000],
-        'rate': [12000,80000,120000],
+        'rate': [80000,120000,130000],
         # 'rate': [40000, 60000, 80000, 100000, 120000, 140000],
         # 'rate': [130000],
         'tx_size': 512,
@@ -332,7 +332,7 @@ def cloudlab_remote(
     # 'max_batch_delay': 35,  # ms
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 100,  # ms
+        'max_header_delay': 50,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
