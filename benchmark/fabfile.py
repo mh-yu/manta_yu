@@ -332,7 +332,7 @@ def cloudlab_remote(
     # 'max_batch_delay': 35,  # ms
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 50,  # ms
+        'max_header_delay': 120,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
