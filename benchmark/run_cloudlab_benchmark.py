@@ -169,7 +169,7 @@ Examples:
     parser.add_argument('--disable-cross-step-weak-edges', dest='allow_cross_step_weak_edges',
                        action='store_false',
                        help='Disable weak edges that cross solid-step boundaries; keep weak edges inside each solid step')
-    parser.set_defaults(allow_cross_step_weak_edges=True)
+    parser.set_defaults(allow_cross_step_weak_edges=False)
     parser.add_argument('--fast-coin', dest='enable_fast_coin',
                        action='store_true',
                        help='Enable the fast-coin commit path that starts one round earlier than the regular check')
@@ -190,7 +190,7 @@ Examples:
     parser.add_argument('--no-commit-recheck', dest='enable_commit_recheck',
                        action='store_false',
                        help='Disable repeated pending commit checks for late support certificates')
-    parser.set_defaults(enable_commit_recheck=True)
+    parser.set_defaults(enable_commit_recheck=False)
     parser.add_argument('--fast-coin-candidate-threshold', type=int, default=0,
                        help='Minimum number of leader-round vertices that must each gather f+1 support before fast coin starts leader selection')
     parser.add_argument('--solid-candidate-threshold', type=int, default=0,
