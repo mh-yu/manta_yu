@@ -266,7 +266,7 @@ def cloudlab_remote(
     ctx,
     debug=False,
     sigma=1,
-    kappa=2,
+    kappa=3,
     reference=4,
     coverage=7,
 
@@ -300,7 +300,7 @@ def cloudlab_remote(
     adaptive_intermediate_spill_cap_digests=1,
 
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
-    design_tag='tusk_data_forpaper',
+    design_tag='DAG_rider_data_forpaper',
     network_tag='geo631',
     load_tag='balanced_50_50',
 ):
