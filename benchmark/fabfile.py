@@ -300,9 +300,9 @@ def cloudlab_remote(
     adaptive_intermediate_spill_cap_digests=1,
 
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
-    design_tag='manta_data_forpaper',
-    network_tag='no_delay',
-    load_tag='balanced_100_50',
+    design_tag='manta_data_forpaper2',
+    network_tag='geo',
+    load_tag='balanced_50_50',
 ):
     ''' Run benchmarks on CloudLab '''
     allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
@@ -316,9 +316,9 @@ def cloudlab_remote(
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'rate': [110000,120000,140000],
+        # 'rate': [110000,120000,140000],
         # 'rate': [60000, 40000],
-        # 'rate': [40000, 60000, 80000, 100000, 120000, 140000],
+        'rate': [40000, 60000, 80000, 100000, 110000,120000, 140000],
         # 'rate': [110000],
         'tx_size': 512,
         'duration': 120,
