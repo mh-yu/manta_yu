@@ -325,8 +325,8 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3, enable_wait=True):
         'tx_size': 512,
         'duration': 120,
         'runs': 2,
-        'network_tag': 'geo-forpaper',
-        'rtt_tag': 'forpaper',
+        'network_tag': 'no-delay-forpaper',
+        'rtt_tag': 'no-delay',
     }
     node_params = {
         'header_size': 1_000,  # bytes
