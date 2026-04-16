@@ -285,7 +285,7 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=2):
         'workers': 1,
         'collocate': True,
         'design_tag': 'tusk_data_forpaper',
-        'network_tag': '80ms',
+        'network_tag': 'no_delay_100_50',
         'rate_type': 'balanced',
         'rate': [40000,60000,80000,100000,120000,140000,160000],
         'tx_size': 512,
@@ -294,12 +294,12 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=2):
     }
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 200,  # ms
+        'max_header_delay': 100,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 4,  # number of nodes
         'batch_size': 500_000,  # bytes
-        'max_batch_delay': 200,  # ms
+        'max_batch_delay': 50,  # ms
         'sigma': 1,
         'kappa': 2,
         'reference': 4,
