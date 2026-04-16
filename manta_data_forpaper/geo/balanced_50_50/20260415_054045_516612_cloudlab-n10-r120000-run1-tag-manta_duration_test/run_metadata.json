@@ -1,0 +1,38 @@
+{
+  "created_at_utc": "2026-04-15T05:40:45Z",
+  "label": "cloudlab-n10-r120000-run1-tag-manta_duration_test",
+  "run_dir": "manta_result/manta_duration_test/geo631/balanced_50_50/20260415_054045_516612_cloudlab-n10-r120000-run1-tag-manta_duration_test",
+  "design_tag": "manta_duration_test",
+  "network_tag": "geo631",
+  "load_tag": "balanced_50_50",
+  "benchmark_type": "cloudlab",
+  "bench_params": {
+    "faults": 0,
+    "nodes": 10,
+    "workers": 1,
+    "collocate": true,
+    "rate": 120000,
+    "rate_type": "balanced",
+    "tx_size": 512,
+    "duration": 120,
+    "run": 1
+  },
+  "node_params": {
+    "sigma": 2,
+    "kappa": 2,
+    "reference": 4,
+    "coverage": 7,
+    "allow_cross_step_weak_edges": true,
+    "enable_fast_coin": true,
+    "solid_commit_trigger_on_solid_step": true,
+    "enable_commit_recheck": true,
+    "fast_coin_candidate_threshold": 4,
+    "solid_candidate_threshold": 4,
+    "enable_adaptive_intermediate_spill": true,
+    "adaptive_intermediate_spill_trigger_digests": 5,
+    "adaptive_intermediate_spill_cap_digests": 1,
+    "design_tag": "manta_duration_test",
+    "network_tag": "geo631",
+    "load_tag": "balanced_50_50"
+  }
+}

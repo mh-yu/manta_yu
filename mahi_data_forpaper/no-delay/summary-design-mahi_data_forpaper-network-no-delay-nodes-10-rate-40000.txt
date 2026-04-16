@@ -1,0 +1,40 @@
+================================================================================
+timestamp: 2026-04-16 01:17:46
+design_tag: mahi_data_forpaper
+network_tag: no-delay
+nodes: 10
+rate: 40000
+run: 1/2
+attack: N/A
+================================================================================
+
+-----------------------------------------
+ SUMMARY:
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 node(s)
+ Committee size: 10 node(s)
+ Worker(s) per node: 1 worker(s)
+ Collocate primary and workers: True
+ Input rate: 40,000 tx/s
+ Transaction size: 512 B
+ Execution time: 120 s
+
+ Header size: 1,000 B
+ Max header delay: 200 ms
+ GC depth: 50 round(s)
+ Sync retry delay: 1,000 ms
+ Sync retry nodes: 4 node(s)
+ batch size: 500,000 B
+ Max batch delay: 200 ms
+
+ + RESULTS:
+ Consensus TPS: 39,728 tx/s
+ Consensus BPS: 20,340,712 B/s
+ Consensus latency: 1,035 ms
+
+ End-to-end TPS: 39,689 tx/s
+ End-to-end BPS: 20,320,756 B/s
+ End-to-end latency: 1,251 ms
+-----------------------------------------
+
