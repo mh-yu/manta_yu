@@ -265,13 +265,13 @@ def cloudlab_wan(ctx, action='setup', settings_file='cloudlab_settings.json'):
 def cloudlab_remote(
     ctx,
     debug=False,
-    sigma=1,
-    kappa=3,
-    reference=7,
+    sigma=2,
+    kappa=2,
+    reference=4,
     coverage=7,
 
 
-    allow_cross_step_weak_edges=False,  # 跨solid-step的weak edges
+    allow_cross_step_weak_edges=True,  # 跨solid-step的weak edges
 
 # 提交规则：
 #     对同一个 r1 leader，有 3 次机会：
@@ -288,20 +288,20 @@ def cloudlab_remote(
 #    - 检查对象：r3 -> r1
 #    - 只要前面没提交成功，就还要走这一步
 
-    enable_fast_coin=False, # fast-coin commit 第二轮结束提交
-    solid_commit_trigger_on_solid_step=False, # r3 commit 第三轮结束提交，在收到第一个第四轮证书后 + solid_candidate_threshold 达到预期
-    enable_commit_recheck=False, # r2 commit  fast_coin_candidate_threshold 达到预期
+    enable_fast_coin=True, # fast-coin commit 第二轮结束提交
+    solid_commit_trigger_on_solid_step=True, # r3 commit 第三轮结束提交，在收到第一个第四轮证书后 + solid_candidate_threshold 达到预期
+    enable_commit_recheck=True, # r2 commit  fast_coin_candidate_threshold 达到预期
     fast_coin_candidate_threshold=4,
     solid_candidate_threshold=4,
 
     # 这是payload 的调度，第三轮和第二轮的顶点接收payload，目前以第三轮顶点优先，多余的给第二轮
-    enable_adaptive_intermediate_spill=False, # payload shceduling
+    enable_adaptive_intermediate_spill=True, # payload shceduling
     adaptive_intermediate_spill_trigger_digests=2,
     adaptive_intermediate_spill_cap_digests=1,
 
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
-    design_tag='DAG_rider_data_forpaper',
-    network_tag='geo631',
+    design_tag='manta_data_forpaper',
+    network_tag='80ms',
     load_tag='balanced_50_50',
 ):
     ''' Run benchmarks on CloudLab '''
@@ -317,12 +317,12 @@ def cloudlab_remote(
         'collocate': True,
         'rate_type': 'balanced',
         # 'rate': [80000],
-        'rate': [60000, 40000],
-        # 'rate': [40000, 60000, 80000, 100000, 120000, 140000],
+        # 'rate': [60000, 40000],
+        'rate': [40000, 60000, 80000, 100000, 120000, 140000],
         # 'rate': [110000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 1,       
+        'runs': 2,       
     }
 
     # manta 对以下参数比较敏感 可调整成 50/500_000/50   100/500_000/100  50/128_000/50 80/128_000/35 等等
@@ -332,7 +332,7 @@ def cloudlab_remote(
     # 'max_batch_delay': 35,  # ms
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 100,  # ms
+        'max_header_delay': 50,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
