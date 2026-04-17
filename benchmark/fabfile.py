@@ -266,7 +266,7 @@ def cloudlab_remote(
     ctx,
     debug=False,
     sigma=1,
-    kappa=2,
+    kappa=3,
     reference=7,
     coverage=7,
 
