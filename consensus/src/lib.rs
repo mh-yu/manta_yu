@@ -501,6 +501,10 @@ impl Consensus {
         round: Round,
         state: &State,
     ) -> Option<PendingCommitCheck> {
+        if self.committee.sigma == 1 && self.committee.kappa == 1 {
+            return None;
+        }
+
         let step_length = self.committee.solid_step_length();
         if !self
             .committee
@@ -541,10 +545,10 @@ impl Consensus {
             return None;
         }
 
-        // Restore the legacy sigma=1 behavior: as soon as the support round itself
-        // has accumulated `coverage` certificates, start the solid-path commit check
-        // immediately instead of waiting for the next round's wave-start trigger.
-        if self.support_round_total_stake(state, round) < self.committee.coverage as Stake {
+        // Restore the legacy sigma=1 behavior: trigger exactly once when the
+        // support round first reaches `coverage`, then rely on the normal
+        // recheck path (if enabled) for any later support certificates.
+        if self.support_round_total_stake(state, round) != self.committee.coverage as Stake {
             return None;
         }
 

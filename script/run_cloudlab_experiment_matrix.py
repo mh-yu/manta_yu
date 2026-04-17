@@ -142,7 +142,7 @@ def build_experiments(committee_size: int) -> List[Experiment]:
                     allow_cross_step_weak_edges=True,
                     enable_fast_coin=True,
                     solid_commit_trigger_on_solid_step=True,
-                    enable_commit_recheck=True,
+                    enable_commit_recheck=False,
                     enable_adaptive_intermediate_spill=True,
                 )
             )
@@ -234,7 +234,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--design-tag",
-        default="exp2_forpaper",
+        default="experiment2_forpaper",
         help="Value passed to fab cloudlab-remote --design-tag",
     )
     parser.add_argument(
