@@ -295,10 +295,10 @@ def cloudlab_remote(
     solid_candidate_threshold=0,
 
     attack_enabled=True,
-    attack_start_secs=50,
-    attack_duration_secs=30,
+    attack_start_secs=80,
+    attack_duration_secs=5,
     attack_group_size=5,
-    attack_limit_headers=True,
+    attack_limit_headers=False,
     attack_limit_certificates=True,
 
     # 这是payload 的调度，第三轮和第二轮的顶点接收payload，目前以第三轮顶点优先，多余的给第二轮
