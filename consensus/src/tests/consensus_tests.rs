@@ -422,6 +422,111 @@ fn solid_commit_wave_start_skips_solid_step_trigger_round() {
 }
 
 #[tokio::test]
+async fn sigma_one_commits_immediately_when_round_two_reaches_coverage() {
+    let committee = Committee {
+        sigma: 1,
+        kappa: 1,
+        reference: 3,
+        coverage: 3,
+        allow_cross_step_weak_edges: false,
+        enable_fast_coin: false,
+        enable_commit_recheck: false,
+        solid_commit_trigger_on_solid_step: false,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let genesis_parents = genesis_certs
+        .iter()
+        .map(|certificate| certificate.digest())
+        .collect::<BTreeSet<_>>();
+
+    let leader_author = authorities[0];
+    let supporter_a = authorities[1];
+    let supporter_b = authorities[2];
+    let supporter_c = authorities[3];
+
+    let (_, mut leader_round_1) = mock_certificate(leader_author, 1, genesis_parents.clone());
+    leader_round_1.header.id = leader_round_1.header.digest();
+    let leader_header_id = leader_round_1.header.id.clone();
+
+    let mut support_vertices = HashSet::new();
+    support_vertices.insert(leader_header_id);
+
+    let (_, support_round_2_a) = mock_certificate_with_solid_wave(
+        supporter_a,
+        2,
+        BTreeSet::new(),
+        support_vertices.clone(),
+    );
+    let (_, support_round_2_b) = mock_certificate_with_solid_wave(
+        supporter_b,
+        2,
+        BTreeSet::new(),
+        support_vertices.clone(),
+    );
+    let (_, support_round_2_c) = mock_certificate_with_solid_wave(
+        supporter_c,
+        2,
+        BTreeSet::new(),
+        support_vertices,
+    );
+
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(10);
+    let (tx_output, mut rx_output) = channel(10);
+    let mut consensus = Consensus {
+        committee,
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs.clone(),
+    };
+    tokio::spawn(async move { while rx_primary.recv().await.is_some() {} });
+
+    let mut state = State::new(genesis_certs);
+    state.insert(leader_round_1.clone());
+    state.insert(support_round_2_a);
+    state.insert(support_round_2_b);
+
+    assert!(
+        consensus
+            .sigma_one_immediate_pending_commit_check_for_round(2, &state)
+            .is_none(),
+        "sigma=1 should wait until round 2 reaches coverage before activating commit"
+    );
+
+    state.insert(support_round_2_c);
+    let mut pending = consensus
+        .sigma_one_immediate_pending_commit_check_for_round(2, &state)
+        .expect("round 2 should activate the sigma=1 immediate commit check once coverage is met");
+    assert_eq!(pending.leader_round, 1);
+    assert_eq!(pending.support_round, 2);
+    assert!(!pending.candidate_gate_enabled);
+
+    let committed = consensus
+        .evaluate_pending_commit_check(&mut state, 2, &mut pending)
+        .await;
+    assert!(
+        committed,
+        "sigma=1 should commit immediately on round 2 once coverage support is present"
+    );
+
+    let committed_leader = rx_output.recv().await.unwrap();
+    assert_eq!(committed_leader.round(), 1);
+    assert_eq!(committed_leader.origin(), leader_author);
+}
+
+#[tokio::test]
 async fn late_support_certificate_rechecks_pending_commit() {
     let _ = env_logger::builder()
         .is_test(true)

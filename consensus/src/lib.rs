@@ -532,6 +532,36 @@ impl Consensus {
         )
     }
 
+    fn sigma_one_immediate_pending_commit_check_for_round(
+        &self,
+        round: Round,
+        state: &State,
+    ) -> Option<PendingCommitCheck> {
+        if self.committee.sigma != 1 || self.committee.kappa != 1 || round <= 1 {
+            return None;
+        }
+
+        // Restore the legacy sigma=1 behavior: as soon as the support round itself
+        // has accumulated `coverage` certificates, start the solid-path commit check
+        // immediately instead of waiting for the next round's wave-start trigger.
+        if self.support_round_total_stake(state, round) < self.committee.coverage as Stake {
+            return None;
+        }
+
+        let leader_round = round - 1;
+        if leader_round != 1 && !self.committee.is_solid_wave(leader_round) {
+            return None;
+        }
+
+        self.build_pending_commit_check(
+            CommitCheckPath::Solid,
+            leader_round,
+            round,
+            false,
+            state,
+        )
+    }
+
     fn solid_pending_commit_checks_for_round(
         &self,
         round: Round,
@@ -602,6 +632,10 @@ impl Consensus {
         state: &State,
     ) -> Vec<PendingCommitCheck> {
         let mut candidates = Vec::new();
+        if let Some(candidate) = self.sigma_one_immediate_pending_commit_check_for_round(round, state)
+        {
+            candidates.push(candidate);
+        }
         if let Some(candidate) = self.fast_coin_pending_commit_check_for_round(round, state) {
             candidates.push(candidate);
         }
