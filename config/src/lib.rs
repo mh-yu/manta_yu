@@ -449,7 +449,12 @@ impl Committee {
     /// Returns the round whose authors should be tracked for indirect back-links
     /// while building `round`.
     pub fn wave_back_link_tracking_round(&self, round: u64) -> Option<u64> {
-        (round > 1).then(|| self.solid_wave_boundary_at_or_before(round - 1) + 1)
+        if round <= 1 {
+            return None;
+        }
+
+        let tracked_round = self.solid_wave_boundary_at_or_before(round - 1) + 1;
+        (tracked_round < round).then_some(tracked_round)
     }
 
     /// Returns the round whose reachable authors must satisfy the wave back-link
@@ -570,5 +575,39 @@ mod tests {
 
         committee.allow_cross_step_weak_edges = false;
         assert_eq!(committee.cross_step_weak_parent_start(8), 7);
+    }
+
+    #[test]
+    fn wave_back_link_tracking_round_avoids_self_reference_for_sigma_one_kappa_one() {
+        let committee = Committee {
+            sigma: 1,
+            kappa: 1,
+            ..overlapping_committee()
+        };
+
+        assert_eq!(committee.wave_back_link_tracking_round(1), None);
+        assert_eq!(committee.wave_back_link_tracking_round(2), None);
+        assert_eq!(committee.wave_back_link_tracking_round(3), None);
+        assert_eq!(committee.wave_back_link_target_round(2), None);
+        assert_eq!(committee.wave_back_link_target_round(3), None);
+    }
+
+    #[test]
+    fn wave_back_link_tracking_round_is_preserved_for_non_degenerate_waves() {
+        let sigma_one_kappa_two = Committee {
+            sigma: 1,
+            kappa: 2,
+            ..overlapping_committee()
+        };
+        assert_eq!(sigma_one_kappa_two.wave_back_link_tracking_round(3), Some(2));
+        assert_eq!(sigma_one_kappa_two.wave_back_link_target_round(3), Some(2));
+
+        let sigma_two_kappa_one = Committee {
+            sigma: 2,
+            kappa: 1,
+            ..overlapping_committee()
+        };
+        assert_eq!(sigma_two_kappa_one.wave_back_link_tracking_round(3), Some(2));
+        assert_eq!(sigma_two_kappa_one.wave_back_link_target_round(3), Some(2));
     }
 }
