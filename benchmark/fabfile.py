@@ -267,8 +267,8 @@ def cloudlab_remote(
     debug=False,
     sigma=1,
     kappa=2,
-    reference=4,
-    coverage=4,
+    reference=7,
+    coverage=7,
 
 
     allow_cross_step_weak_edges=False,  # 跨solid-step的weak edges
@@ -294,15 +294,15 @@ def cloudlab_remote(
     fast_coin_candidate_threshold=0,
     solid_candidate_threshold=0,
 
-    attack_enabled=False,
-    attack_start_secs=30,
-    attack_duration_secs=20,
+    attack_enabled=True,
+    attack_start_secs=50,
+    attack_duration_secs=30,
     attack_group_size=5,
     attack_limit_headers=False,
     attack_limit_certificates=True,
 
     # 这是payload 的调度，第三轮和第二轮的顶点接收payload，目前以第三轮顶点优先，多余的给第二轮
-    enable_adaptive_intermediate_spill=True, # payload shceduling
+    enable_adaptive_intermediate_spill=False, # payload shceduling
     adaptive_intermediate_spill_trigger_digests=2,
     adaptive_intermediate_spill_cap_digests=1,
 

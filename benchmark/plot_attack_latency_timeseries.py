@@ -66,6 +66,8 @@ def bucketize(rows: list[dict[str, float]], bucket_size_s: float) -> dict[int, f
 def aggregate_runs(
     run_dirs: list[Path],
     bucket_size_s: float,
+    attack_start_override: float | None,
+    attack_duration_override: float | None,
 ) -> tuple[dict[str, dict[int, float]], dict[str, dict[str, float]]]:
     grouped_runs: dict[str, list[dict[int, float]]] = defaultdict(list)
     attack_windows: dict[str, dict[str, float]] = {}
@@ -78,10 +80,22 @@ def aggregate_runs(
         if not rows:
             continue
         grouped_runs[label].append(bucketize(rows, bucket_size_s))
-        attack_windows[label] = {
-            "start": float(node_params.get("attack_start_secs", 0)),
-            "duration": float(node_params.get("attack_duration_secs", 0)),
-        }
+        attack_enabled = bool(node_params.get("attack_enabled", False))
+        attack_start = (
+            attack_start_override
+            if attack_start_override is not None
+            else node_params.get("attack_start_secs")
+        )
+        attack_duration = (
+            attack_duration_override
+            if attack_duration_override is not None
+            else node_params.get("attack_duration_secs")
+        )
+        if attack_start is not None and (attack_enabled or attack_start_override is not None):
+            attack_windows[label] = {
+                "start": float(attack_start),
+                "duration": float(attack_duration or 0),
+            }
 
     aggregated: dict[str, dict[int, float]] = {}
     for label, run_buckets in grouped_runs.items():
@@ -181,6 +195,18 @@ def parse_args() -> argparse.Namespace:
         default=",".join(DEFAULT_ORDER),
         help="Comma-separated configuration label order, e.g. k2-c4,k2-c7,k3-c7,k4-c7",
     )
+    parser.add_argument(
+        "--attack-start-secs",
+        type=float,
+        default=None,
+        help="Override attack start time in seconds when metadata is missing or incorrect.",
+    )
+    parser.add_argument(
+        "--attack-duration-secs",
+        type=float,
+        default=None,
+        help="Override attack duration in seconds when metadata is missing or incorrect.",
+    )
     return parser.parse_args()
 
 
@@ -196,7 +222,12 @@ def main() -> None:
     if not run_dirs:
         raise SystemExit(f"No run directories with latency.csv found under {input_dir}")
 
-    aggregated, attack_windows = aggregate_runs(run_dirs, args.bucket_size)
+    aggregated, attack_windows = aggregate_runs(
+        run_dirs,
+        args.bucket_size,
+        args.attack_start_secs,
+        args.attack_duration_secs,
+    )
     if not aggregated:
         raise SystemExit("No consensus latency samples found.")
 
