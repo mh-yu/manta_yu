@@ -282,6 +282,7 @@ class LogParser:
             ('Solid candidate threshold', 'solid_candidate_threshold'),
             ('Attack enabled', 'attack_enabled'),
             ('Attack start seconds', 'attack_start_secs'),
+            ('Attack duration seconds', 'attack_duration_secs'),
             ('Attack group size', 'attack_group_size'),
             ('Attack limit headers', 'attack_limit_headers'),
             ('Attack limit certificates', 'attack_limit_certificates'),
@@ -372,6 +373,16 @@ class LogParser:
     def export_latency_csv(self, filename=None):
         filename = filename or PathMaker.latency_csv_file()
         rows = []
+        baseline_candidates = [
+            self.proposals[digest]
+            for digest in self._committed_batch_ids(require_proposal=True)
+            if digest in self.proposals
+        ]
+        if baseline_candidates:
+            baseline_ts = min(baseline_candidates)
+        else:
+            commit_candidates = [ts for _, ts in self.commits.items()]
+            baseline_ts = min(commit_candidates) if commit_candidates else None
 
         for batch_id, commit_ts in sorted(self.commits.items(), key=lambda item: item[1]):
             proposal_ts = self.proposals.get(batch_id)
@@ -380,6 +391,9 @@ class LogParser:
             rows.append({
                 'metric': 'consensus_latency',
                 'identifier': batch_id,
+                'proposal_ts': round(proposal_ts, 6),
+                'commit_ts': round(commit_ts, 6),
+                'relative_time_s': round(commit_ts - baseline_ts, 6) if baseline_ts is not None else '',
                 'latency_ms': round((commit_ts - proposal_ts) * 1000, 3),
             })
 
@@ -387,6 +401,9 @@ class LogParser:
             rows.append({
                 'metric': 'end_to_end_latency',
                 'identifier': f'{client_index}:{tx_id}',
+                'proposal_ts': round(start_ts, 6),
+                'commit_ts': round(commit_ts, 6),
+                'relative_time_s': round(commit_ts - baseline_ts, 6) if baseline_ts is not None else '',
                 'latency_ms': round((commit_ts - start_ts) * 1000, 3),
             })
 
@@ -395,7 +412,17 @@ class LogParser:
 
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=['metric', 'identifier', 'latency_ms'])
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    'metric',
+                    'identifier',
+                    'proposal_ts',
+                    'commit_ts',
+                    'relative_time_s',
+                    'latency_ms',
+                ],
+            )
             writer.writeheader()
             writer.writerows(rows)
         return filename

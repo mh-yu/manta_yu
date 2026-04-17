@@ -38,6 +38,10 @@ fn default_attack_start_secs() -> u64 {
     0
 }
 
+fn default_attack_duration_secs() -> u64 {
+    0
+}
+
 fn default_attack_group_size() -> usize {
     0
 }
@@ -261,6 +265,9 @@ pub struct Committee {
     /// Delay in seconds before the selective-broadcast attack becomes active.
     #[serde(default = "default_attack_start_secs")]
     pub attack_start_secs: u64,
+    /// Attack duration in seconds. Zero means the attack stays enabled until the run ends.
+    #[serde(default = "default_attack_duration_secs")]
+    pub attack_duration_secs: u64,
     /// Size of the first attack group. When set to 0, split the committee in half.
     #[serde(default = "default_attack_group_size")]
     pub attack_group_size: usize,
@@ -647,6 +654,7 @@ mod tests {
             solid_commit_trigger_on_solid_step: false,
             attack_enabled: false,
             attack_start_secs: 0,
+            attack_duration_secs: 0,
             attack_group_size: 0,
             attack_limit_headers: false,
             attack_limit_certificates: true,

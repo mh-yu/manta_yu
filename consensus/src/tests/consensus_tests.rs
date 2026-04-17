@@ -45,6 +45,7 @@ pub fn mock_committee() -> Committee {
         solid_commit_trigger_on_solid_step: true,
         attack_enabled: false,
         attack_start_secs: 0,
+        attack_duration_secs: 0,
         attack_group_size: 0,
         attack_limit_headers: false,
         attack_limit_certificates: true,

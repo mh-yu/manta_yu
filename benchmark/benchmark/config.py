@@ -47,7 +47,7 @@ class Committee:
                  solid_commit_trigger_on_solid_step=False,
                  enable_commit_recheck=True, fast_coin_candidate_threshold=0,
                  solid_candidate_threshold=0, attack_enabled=False,
-                 attack_start_secs=0, attack_group_size=0,
+                 attack_start_secs=0, attack_duration_secs=0, attack_group_size=0,
                  attack_limit_headers=False,
                  attack_limit_certificates=True):
         ''' The `addresses` field looks as follows:
@@ -82,6 +82,7 @@ class Committee:
             'solid_candidate_threshold': solid_candidate_threshold,
             'attack_enabled': attack_enabled,
             'attack_start_secs': attack_start_secs,
+            'attack_duration_secs': attack_duration_secs,
             'attack_group_size': attack_group_size,
             'attack_limit_headers': attack_limit_headers,
             'attack_limit_certificates': attack_limit_certificates,
@@ -181,7 +182,7 @@ class LocalCommittee(Committee):
                  solid_commit_trigger_on_solid_step=False,
                  enable_commit_recheck=True, fast_coin_candidate_threshold=0,
                  solid_candidate_threshold=0, attack_enabled=False,
-                 attack_start_secs=0, attack_group_size=0,
+                 attack_start_secs=0, attack_duration_secs=0, attack_group_size=0,
                  attack_limit_headers=False,
                  attack_limit_certificates=True):
         assert isinstance(names, list)
@@ -204,6 +205,7 @@ class LocalCommittee(Committee):
             solid_candidate_threshold,
             attack_enabled,
             attack_start_secs,
+            attack_duration_secs,
             attack_group_size,
             attack_limit_headers,
             attack_limit_certificates,
@@ -241,6 +243,7 @@ class NodeParameters:
             'adaptive_intermediate_spill_trigger_digests',
             'adaptive_intermediate_spill_cap_digests',
             'attack_start_secs',
+            'attack_duration_secs',
             'attack_group_size',
         ]
         for field in optional_int_fields:

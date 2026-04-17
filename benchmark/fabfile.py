@@ -296,6 +296,7 @@ def cloudlab_remote(
 
     attack_enabled=False,
     attack_start_secs=30,
+    attack_duration_secs=20,
     attack_group_size=5,
     attack_limit_headers=False,
     attack_limit_certificates=True,
@@ -306,7 +307,7 @@ def cloudlab_remote(
     adaptive_intermediate_spill_cap_digests=1,
 
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
-    design_tag='experiment2_forpaper',
+    design_tag='experiment2_faulty',
     network_tag='geo',
     load_tag='balanced_50_50',
 ):
@@ -359,6 +360,7 @@ def cloudlab_remote(
         'solid_candidate_threshold': int(solid_candidate_threshold),
         'attack_enabled': attack_enabled,
         'attack_start_secs': int(attack_start_secs),
+        'attack_duration_secs': int(attack_duration_secs),
         'attack_group_size': int(attack_group_size),
         'attack_limit_headers': attack_limit_headers,
         'attack_limit_certificates': attack_limit_certificates,

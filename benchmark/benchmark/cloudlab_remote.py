@@ -998,6 +998,10 @@ class CloudLabBench:
             'attack_start_secs',
             0,
         )
+        attack_duration_secs = node_parameters.json.get(
+            'attack_duration_secs',
+            0,
+        )
         attack_group_size = node_parameters.json.get(
             'attack_group_size',
             0,
@@ -1025,6 +1029,7 @@ class CloudLabBench:
             solid_candidate_threshold,
             attack_enabled,
             attack_start_secs,
+            attack_duration_secs,
             attack_group_size,
             attack_limit_headers,
             attack_limit_certificates,

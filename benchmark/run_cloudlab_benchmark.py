@@ -83,6 +83,7 @@ def process_logs(faults=0, save_to_file=True):
     try:
         parser = LogParser.process(logs_dir, faults=faults)
         result = parser.result()
+        latency_csv = parser.export_latency_csv()
         
         # Print results
         print(result)
@@ -98,6 +99,8 @@ def process_logs(faults=0, save_to_file=True):
                 f.write(result)
             
             Print.info(f'\nResults saved to: {result_file}')
+            if latency_csv:
+                Print.info(f'Latency CSV exported to: {latency_csv}')
         
         artifacts = PathMaker.export_run_artifacts()
         if 'final_dag' in artifacts:
@@ -212,6 +215,27 @@ Examples:
                        help='Network tag used in the output directory hierarchy and summary (default: default_network)')
     parser.add_argument('--load-tag', default='default_load',
                        help='Load tag used in the output directory hierarchy and summary (default: default_load)')
+    parser.add_argument('--attack-enabled', dest='attack_enabled', action='store_true',
+                       help='Enable the selective-broadcast attack')
+    parser.add_argument('--no-attack', dest='attack_enabled', action='store_false',
+                       help='Disable the selective-broadcast attack')
+    parser.set_defaults(attack_enabled=False)
+    parser.add_argument('--attack-start-secs', type=int, default=30,
+                       help='Attack start time in seconds from run start')
+    parser.add_argument('--attack-duration-secs', type=int, default=20,
+                       help='Attack duration in seconds; 0 means keep attacking until the run ends')
+    parser.add_argument('--attack-group-size', type=int, default=5,
+                       help='Size of the first attack group; 0 splits nodes evenly')
+    parser.add_argument('--attack-limit-headers', dest='attack_limit_headers', action='store_true',
+                       help='Limit cross-group header broadcasts during the attack window')
+    parser.add_argument('--no-attack-limit-headers', dest='attack_limit_headers', action='store_false',
+                       help='Do not limit header broadcasts during the attack window')
+    parser.set_defaults(attack_limit_headers=False)
+    parser.add_argument('--attack-limit-certificates', dest='attack_limit_certificates', action='store_true',
+                       help='Limit cross-group certificate broadcasts and sync replies during the attack window')
+    parser.add_argument('--no-attack-limit-certificates', dest='attack_limit_certificates', action='store_false',
+                       help='Do not limit certificate broadcasts during the attack window')
+    parser.set_defaults(attack_limit_certificates=True)
     
     args = parser.parse_args()
     
@@ -255,6 +279,12 @@ Examples:
                 'design_tag': args.design_tag,
                 'network_tag': args.network_tag,
                 'load_tag': args.load_tag,
+                'attack_enabled': args.attack_enabled,
+                'attack_start_secs': args.attack_start_secs,
+                'attack_duration_secs': args.attack_duration_secs,
+                'attack_group_size': args.attack_group_size,
+                'attack_limit_headers': args.attack_limit_headers,
+                'attack_limit_certificates': args.attack_limit_certificates,
             },
         )
         if not success:

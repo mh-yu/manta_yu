@@ -100,17 +100,27 @@ impl Core {
     }
 
     fn attack_active_for_headers(&self) -> bool {
-        self.committee.attack_enabled
-            && self.committee.attack_limit_headers
-            && self.boot_instant.elapsed()
-                >= Duration::from_secs(self.committee.attack_start_secs)
+        self.committee.attack_limit_headers && self.attack_active_now()
     }
 
     fn attack_active_for_certificates(&self) -> bool {
-        self.committee.attack_enabled
-            && self.committee.attack_limit_certificates
-            && self.boot_instant.elapsed()
-                >= Duration::from_secs(self.committee.attack_start_secs)
+        self.committee.attack_limit_certificates && self.attack_active_now()
+    }
+
+    fn attack_active_now(&self) -> bool {
+        if !self.committee.attack_enabled {
+            return false;
+        }
+        let elapsed = self.boot_instant.elapsed();
+        let start = Duration::from_secs(self.committee.attack_start_secs);
+        if elapsed < start {
+            return false;
+        }
+        let duration_secs = self.committee.attack_duration_secs;
+        if duration_secs == 0 {
+            return true;
+        }
+        elapsed < start + Duration::from_secs(duration_secs)
     }
 
     fn broadcast_targets(&self, filter_for_headers: bool) -> Vec<(PublicKey, std::net::SocketAddr)> {
