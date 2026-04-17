@@ -810,7 +810,7 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
         pending.seen_support_certificate_digests =
             Self::support_certificate_digests(state, support_round);
         if stake < threshold {
-            info!(
+            debug!(
                 "DAG_COMMIT_CHECK path={} leader_round={} leader_node={} support_round={} support_basis={} trigger_round={} stake={} threshold={} result=insufficient_stake support_set={:?}",
                 path.log_label(),
                 leader_round,
@@ -893,7 +893,7 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
             return false;
         }
 
-        info!(
+        debug!(
             "DAG_COMMIT_CHECK path={} leader_round={} leader_node={} support_round={} support_basis={} trigger_round={} stake={} threshold={} result=committed support_set={:?}",
             path.log_label(),
             leader_round,
@@ -934,7 +934,7 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
 
         for certificate in sequence {
             let node_id = self.author_to_node_id(certificate.origin());
-            info!(
+            debug!(
                 "DAG_COMMITTED round={} node={} digest={:?}",
                 certificate.round(),
                 node_id,
@@ -1214,7 +1214,7 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
 
                 if !vertices.is_empty() {
                     round_output.push_str(&format!(" {} ", vertices.join(" --- ")));
-                    info!("{}", round_output);
+                    debug!("{}", round_output);
                 }
             }
         }
