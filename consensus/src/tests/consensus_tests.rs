@@ -427,6 +427,59 @@ fn solid_commit_wave_start_skips_solid_step_trigger_round() {
     assert!(!pending.candidate_gate_enabled);
 }
 
+#[test]
+fn solid_commit_wave_start_uses_previous_wave_start_for_sigma_one_kappa_three() {
+    let committee = Committee {
+        sigma: 1,
+        kappa: 3,
+        reference: 3,
+        coverage: 3,
+        allow_cross_step_weak_edges: false,
+        enable_fast_coin: false,
+        enable_commit_recheck: false,
+        solid_commit_trigger_on_solid_step: false,
+        ..mock_committee()
+    };
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let author_to_node = authorities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, authority)| (authority, index))
+        .collect();
+    let genesis_certs = Certificate::genesis(&committee);
+    let genesis_parents = genesis_certs
+        .iter()
+        .map(|certificate| certificate.digest())
+        .collect::<BTreeSet<_>>();
+
+    let (_, leader_round_1) = mock_certificate(authorities[0], 1, genesis_parents);
+    let mut state = State::new(genesis_certs.clone());
+    state.insert(leader_round_1);
+
+    let (_tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, _rx_primary) = channel(10);
+    let (tx_output, _rx_output) = channel(10);
+    let consensus = Consensus {
+        committee,
+        authorities,
+        author_to_node,
+        gc_depth: 50,
+        rx_primary: rx_waiter,
+        tx_primary,
+        tx_output,
+        genesis: genesis_certs,
+    };
+
+    assert!(consensus.solid_pending_commit_check_for_round(3, &state).is_none());
+    let pending = consensus
+        .solid_pending_commit_check_for_round(4, &state)
+        .expect("round 4 should activate the default wave-start solid check for kappa=3");
+    assert_eq!(pending.support_round, 3);
+    assert_eq!(pending.leader_round, 1);
+    assert!(!pending.candidate_gate_enabled);
+}
+
 #[tokio::test]
 async fn sigma_one_commits_immediately_when_round_two_reaches_coverage() {
     let committee = Committee {

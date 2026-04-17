@@ -505,7 +505,6 @@ impl Consensus {
             return None;
         }
 
-        let step_length = self.committee.solid_step_length();
         if !self
             .committee
             .is_first_round_of_second_or_later_solid_wave(round)
@@ -520,7 +519,7 @@ impl Consensus {
             prev_wave_start,
             prev_wave_end,
         )?;
-        let leader_round = support_round.saturating_sub(step_length);
+        let leader_round = prev_wave_start;
         if leader_round < 1 {
             return None;
         }
