@@ -990,6 +990,26 @@ class CloudLabBench:
             'solid_candidate_threshold',
             0,
         )
+        attack_enabled = node_parameters.json.get(
+            'attack_enabled',
+            False,
+        )
+        attack_start_secs = node_parameters.json.get(
+            'attack_start_secs',
+            0,
+        )
+        attack_group_size = node_parameters.json.get(
+            'attack_group_size',
+            0,
+        )
+        attack_limit_headers = node_parameters.json.get(
+            'attack_limit_headers',
+            False,
+        )
+        attack_limit_certificates = node_parameters.json.get(
+            'attack_limit_certificates',
+            True,
+        )
         committee = Committee(
             addresses,
             self.settings.base_port,
@@ -1003,6 +1023,11 @@ class CloudLabBench:
             enable_commit_recheck,
             fast_coin_candidate_threshold,
             solid_candidate_threshold,
+            attack_enabled,
+            attack_start_secs,
+            attack_group_size,
+            attack_limit_headers,
+            attack_limit_certificates,
         )
         committee.print(PathMaker.committee_file())
         

@@ -265,13 +265,13 @@ def cloudlab_wan(ctx, action='setup', settings_file='cloudlab_settings.json'):
 def cloudlab_remote(
     ctx,
     debug=False,
-    sigma=2,
+    sigma=1,
     kappa=2,
     reference=4,
-    coverage=7,
+    coverage=4,
 
 
-    allow_cross_step_weak_edges=True,  # 跨solid-step的weak edges
+    allow_cross_step_weak_edges=False,  # 跨solid-step的weak edges
 
 # 提交规则：
 #     对同一个 r1 leader，有 3 次机会：
@@ -288,11 +288,17 @@ def cloudlab_remote(
 #    - 检查对象：r3 -> r1
 #    - 只要前面没提交成功，就还要走这一步
 
-    enable_fast_coin=True, # fast-coin commit 第二轮结束提交
-    solid_commit_trigger_on_solid_step=True, # r3 commit 第三轮结束提交，在收到第一个第四轮证书后 + solid_candidate_threshold 达到预期
-    enable_commit_recheck=True, # r2 commit  fast_coin_candidate_threshold 达到预期
-    fast_coin_candidate_threshold=1,
-    solid_candidate_threshold=1,
+    enable_fast_coin=False, # 关闭提前提交路径，保留 regular solid path
+    solid_commit_trigger_on_solid_step=False,
+    enable_commit_recheck=False,
+    fast_coin_candidate_threshold=0,
+    solid_candidate_threshold=0,
+
+    attack_enabled=False,
+    attack_start_secs=30,
+    attack_group_size=5,
+    attack_limit_headers=False,
+    attack_limit_certificates=True,
 
     # 这是payload 的调度，第三轮和第二轮的顶点接收payload，目前以第三轮顶点优先，多余的给第二轮
     enable_adaptive_intermediate_spill=True, # payload shceduling
@@ -309,6 +315,9 @@ def cloudlab_remote(
     enable_fast_coin = _coerce_bool(enable_fast_coin)
     solid_commit_trigger_on_solid_step = _coerce_bool(solid_commit_trigger_on_solid_step)
     enable_commit_recheck = _coerce_bool(enable_commit_recheck)
+    attack_enabled = _coerce_bool(attack_enabled)
+    attack_limit_headers = _coerce_bool(attack_limit_headers)
+    attack_limit_certificates = _coerce_bool(attack_limit_certificates)
     enable_adaptive_intermediate_spill = _coerce_bool(enable_adaptive_intermediate_spill)
     bench_params = {
         'faults': 0,
@@ -348,6 +357,11 @@ def cloudlab_remote(
         'enable_commit_recheck': enable_commit_recheck,
         'fast_coin_candidate_threshold': int(fast_coin_candidate_threshold),
         'solid_candidate_threshold': int(solid_candidate_threshold),
+        'attack_enabled': attack_enabled,
+        'attack_start_secs': int(attack_start_secs),
+        'attack_group_size': int(attack_group_size),
+        'attack_limit_headers': attack_limit_headers,
+        'attack_limit_certificates': attack_limit_certificates,
         'enable_adaptive_intermediate_spill': enable_adaptive_intermediate_spill,
         'adaptive_intermediate_spill_trigger_digests': int(adaptive_intermediate_spill_trigger_digests),
         'adaptive_intermediate_spill_cap_digests': int(adaptive_intermediate_spill_cap_digests),

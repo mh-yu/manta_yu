@@ -14,6 +14,7 @@ use network::{CancelHandler, ReliableSender};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use store::Store;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -66,6 +67,8 @@ pub struct Core {
     network: ReliableSender,
     /// Keeps the cancel handlers of the messages we sent.
     cancel_handlers: HashMap<Round, Vec<CancelHandler>>,
+    /// Node-local attack clock.
+    boot_instant: Instant,
 }
 
 impl Core {
@@ -94,6 +97,40 @@ impl Core {
         }
 
         (target_round, bitmap)
+    }
+
+    fn attack_active_for_headers(&self) -> bool {
+        self.committee.attack_enabled
+            && self.committee.attack_limit_headers
+            && self.boot_instant.elapsed()
+                >= Duration::from_secs(self.committee.attack_start_secs)
+    }
+
+    fn attack_active_for_certificates(&self) -> bool {
+        self.committee.attack_enabled
+            && self.committee.attack_limit_certificates
+            && self.boot_instant.elapsed()
+                >= Duration::from_secs(self.committee.attack_start_secs)
+    }
+
+    fn broadcast_targets(&self, filter_for_headers: bool) -> Vec<(PublicKey, std::net::SocketAddr)> {
+        let attack_active = if filter_for_headers {
+            self.attack_active_for_headers()
+        } else {
+            self.attack_active_for_certificates()
+        };
+
+        self.committee
+            .others_primaries(&self.name)
+            .into_iter()
+            .filter(|(recipient, _)| {
+                !attack_active
+                    || self
+                        .committee
+                        .selective_attack_allows_sender_to_recipient(&self.name, recipient)
+            })
+            .map(|(recipient, addresses)| (recipient, addresses.primary_to_primary))
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -135,6 +172,7 @@ impl Core {
                 certificates_aggregators: HashMap::with_capacity(2 * gc_depth as usize),
                 network: ReliableSender::new(),
                 cancel_handlers: HashMap::with_capacity(2 * gc_depth as usize),
+                boot_instant: Instant::now(),
             }
             .run()
             .await;
@@ -158,18 +196,13 @@ impl Core {
             "Broadcasting header {} (round {}) to other primaries",
             header.id, header.round
         );
-        let addresses: Vec<_> = self
-            .committee
-            .others_primaries(&self.name)
-            .iter()
-            .map(|(_, x)| x.primary_to_primary)
-            .collect();
+        let targets = self.broadcast_targets(true);
         let bytes = bincode::serialize(&PrimaryMessage::Header(header.clone()))
             .expect("Failed to serialize our own header");
         // Send to each primary individually so we can log per-node success/failure.
         let header_id = header.id.clone();
         let header_round = header.round;
-        for address in addresses {
+        for (_, address) in targets {
             let handler = self.network.send(address, Bytes::from(bytes.clone())).await;
             let id = header_id.clone();
             tokio::spawn(async move {
@@ -398,15 +431,10 @@ impl Core {
                 "Broadcasting certificate {} (round {}) to other primaries",
                 cert_id, cert_round
             );
-            let addresses: Vec<_> = self
-                .committee
-                .others_primaries(&self.name)
-                .iter()
-                .map(|(_, x)| x.primary_to_primary)
-                .collect();
+            let targets = self.broadcast_targets(false);
             let bytes = bincode::serialize(&PrimaryMessage::Certificate(certificate.clone()))
                 .expect("Failed to serialize our own certificate");
-            for address in addresses {
+            for (_, address) in targets {
                 let handler = self.network.send(address, Bytes::from(bytes.clone())).await;
                 let id = cert_id.clone();
                 tokio::spawn(async move {
@@ -606,7 +634,7 @@ impl Core {
         // );
 
         // // Verify the vote.
-        vote.verify(&self.committee).map_err(DagError::from);
+        let _ = vote.verify(&self.committee).map_err(DagError::from);
         Ok(())
     }
 

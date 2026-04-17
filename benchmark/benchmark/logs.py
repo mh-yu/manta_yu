@@ -280,6 +280,11 @@ class LogParser:
             ('Enable commit recheck', 'enable_commit_recheck'),
             ('Fast coin candidate threshold', 'fast_coin_candidate_threshold'),
             ('Solid candidate threshold', 'solid_candidate_threshold'),
+            ('Attack enabled', 'attack_enabled'),
+            ('Attack start seconds', 'attack_start_secs'),
+            ('Attack group size', 'attack_group_size'),
+            ('Attack limit headers', 'attack_limit_headers'),
+            ('Attack limit certificates', 'attack_limit_certificates'),
             ('Enable adaptive intermediate spill', 'enable_adaptive_intermediate_spill'),
             (
                 'Adaptive intermediate spill trigger digests',

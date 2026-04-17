@@ -1,7 +1,8 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use super::*;
 use crate::common::{
-    certificate, committee, committee_with_base_port, header, headers, keys, listener, votes,
+    attack_committee, certificate, committee, committee_with_base_port, header, headers, keys,
+    listener, votes,
 };
 use crate::messages::set_author_bit;
 use crypto::Signature;
@@ -892,10 +893,7 @@ async fn process_certificates() {
             .map(|x| x.digest())
             .collect::<Vec<_>>(),
     );
-    let mut expected_parents = parents;
-    expected_parents.wave_back_link_target_round = 2;
-    expected_parents.wave_back_link_author_bitmap = vec![0; committee().authority_bitmap_len()];
-    assert_eq!(received, (expected_parents, 1));
+    assert_eq!(received, (parents, 1));
 
     // Ensure the core sends the certificates to the consensus.
     for x in certificates.clone() {
@@ -909,4 +907,41 @@ async fn process_certificates() {
         let serialized = bincode::serialize(x).unwrap();
         assert_eq!(stored, Some(serialized));
     }
+}
+
+#[test]
+fn selective_attack_keeps_only_minimal_cross_group_senders() {
+    let committee = attack_committee(3);
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+
+    let sender_same_group = authorities[1];
+    let sender_other_group_allowed = authorities[2];
+    let sender_other_group_blocked = authorities[3];
+    let recipient = authorities[0];
+
+    assert!(committee.selective_attack_allows_sender_to_recipient(
+        &sender_same_group,
+        &recipient
+    ));
+    assert!(committee.selective_attack_allows_sender_to_recipient(
+        &sender_other_group_allowed,
+        &recipient
+    ));
+    assert!(!committee.selective_attack_allows_sender_to_recipient(
+        &sender_other_group_blocked,
+        &recipient
+    ));
+}
+
+#[test]
+fn selective_attack_cuts_all_cross_group_senders_at_local_coverage() {
+    let committee = attack_committee(2);
+    let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+    let recipient = authorities[0];
+
+    assert_eq!(committee.selective_attack_cross_group_sender_limit(&recipient), 0);
+    assert!(!committee.selective_attack_allows_sender_to_recipient(
+        &authorities[2],
+        &recipient
+    ));
 }

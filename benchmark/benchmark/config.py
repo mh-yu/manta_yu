@@ -46,7 +46,10 @@ class Committee:
                  allow_cross_step_weak_edges=True, enable_fast_coin=False,
                  solid_commit_trigger_on_solid_step=False,
                  enable_commit_recheck=True, fast_coin_candidate_threshold=0,
-                 solid_candidate_threshold=0):
+                 solid_candidate_threshold=0, attack_enabled=False,
+                 attack_start_secs=0, attack_group_size=0,
+                 attack_limit_headers=False,
+                 attack_limit_certificates=True):
         ''' The `addresses` field looks as follows:
             { 
                 "name": ["host", "host", ...],
@@ -77,6 +80,11 @@ class Committee:
             'enable_commit_recheck': enable_commit_recheck,
             'fast_coin_candidate_threshold': fast_coin_candidate_threshold,
             'solid_candidate_threshold': solid_candidate_threshold,
+            'attack_enabled': attack_enabled,
+            'attack_start_secs': attack_start_secs,
+            'attack_group_size': attack_group_size,
+            'attack_limit_headers': attack_limit_headers,
+            'attack_limit_certificates': attack_limit_certificates,
         }
         for name, hosts in addresses.items():
             host = hosts.pop(0)
@@ -172,7 +180,10 @@ class LocalCommittee(Committee):
                  allow_cross_step_weak_edges=True, enable_fast_coin=False,
                  solid_commit_trigger_on_solid_step=False,
                  enable_commit_recheck=True, fast_coin_candidate_threshold=0,
-                 solid_candidate_threshold=0):
+                 solid_candidate_threshold=0, attack_enabled=False,
+                 attack_start_secs=0, attack_group_size=0,
+                 attack_limit_headers=False,
+                 attack_limit_certificates=True):
         assert isinstance(names, list)
         assert all(isinstance(x, str) for x in names)
         assert isinstance(port, int)
@@ -191,6 +202,11 @@ class LocalCommittee(Committee):
             enable_commit_recheck,
             fast_coin_candidate_threshold,
             solid_candidate_threshold,
+            attack_enabled,
+            attack_start_secs,
+            attack_group_size,
+            attack_limit_headers,
+            attack_limit_certificates,
         )
 
 
@@ -211,7 +227,12 @@ class NodeParameters:
         if not all(isinstance(x, int) for x in inputs):
             raise ConfigError('Invalid parameters type')
 
-        optional_bool_fields = ['enable_adaptive_intermediate_spill']
+        optional_bool_fields = [
+            'enable_adaptive_intermediate_spill',
+            'attack_enabled',
+            'attack_limit_headers',
+            'attack_limit_certificates',
+        ]
         for field in optional_bool_fields:
             if field in json and not isinstance(json[field], bool):
                 raise ConfigError(f'Invalid parameters type for {field}')
@@ -219,6 +240,8 @@ class NodeParameters:
         optional_int_fields = [
             'adaptive_intermediate_spill_trigger_digests',
             'adaptive_intermediate_spill_cap_digests',
+            'attack_start_secs',
+            'attack_group_size',
         ]
         for field in optional_int_fields:
             if field in json and not isinstance(json[field], int):
