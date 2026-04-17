@@ -1,7 +1,7 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::aggregators::{CertificatesAggregator, VotesAggregator};
 use crate::error::{DagError, DagResult};
-use crate::messages::{author_bitmap_stake, merge_author_bitmaps, set_author_bit, Certificate, Header, ProposalParents, Vote};
+use crate::messages::{merge_author_bitmaps, set_author_bit, Certificate, Header, ProposalParents, Vote};
 use crate::primary::{PrimaryMessage, Round};
 use crate::synchronizer::Synchronizer;
 use async_recursion::async_recursion;
@@ -303,21 +303,11 @@ impl Core {
             );
         }
 
-        let (expected_back_link_round, expected_back_link_bitmap) =
-            self.wave_back_link_summary(&parents, round);
+        let (expected_back_link_round, _) = self.wave_back_link_summary(&parents, round);
         ensure!(
-            header.wave_back_link_target_round == expected_back_link_round
-                && header.wave_back_link_author_bitmap == expected_back_link_bitmap,
+            header.wave_back_link_target_round == expected_back_link_round,
             DagError::MalformedHeader(header.id.clone())
         );
-
-        if let Some(target_round) = self.committee.wave_back_link_target_round(round) {
-            let link_stake = author_bitmap_stake(&self.committee, &expected_back_link_bitmap);
-            ensure!(
-                link_stake >= self.committee.quorum_threshold(),
-                DagError::HeaderRequiresWaveLink(header.id.clone(), target_round)
-            );
-        }
 
         // Ensure we have the payload. If we don't, the synchronizer will ask our workers to get it, and then
         // reschedule processing of this header once we have it.
@@ -526,33 +516,6 @@ impl Core {
                 .or_insert_with(|| Box::new(CertificatesAggregator::new(target_round)))
                 .append(certificate.clone(), &self.committee)?
             {
-                let proposal_round = target_round + 1;
-                if let Some(back_link_round) = self.committee.wave_back_link_target_round(proposal_round) {
-                    if parents.wave_back_link_target_round != back_link_round {
-                        debug!(
-                            "Delaying proposer unlock for round {}: parent bitmap tracks round {} instead of {}",
-                            proposal_round,
-                            parents.wave_back_link_target_round,
-                            back_link_round,
-                        );
-                        continue;
-                    }
-                    let link_stake = author_bitmap_stake(
-                        &self.committee,
-                        &parents.wave_back_link_author_bitmap,
-                    );
-                    if link_stake < self.committee.quorum_threshold() {
-                        debug!(
-                            "Delaying proposer unlock for round {}: only {} stake links to round {} (need {})",
-                            proposal_round,
-                            link_stake,
-                            back_link_round,
-                            self.committee.quorum_threshold(),
-                        );
-                        continue;
-                    }
-                }
-
                 // Send it to the `Proposer`.
                 self.tx_proposer
                     .send((parents, target_round))
