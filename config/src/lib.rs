@@ -388,9 +388,22 @@ impl Committee {
         }
     }
 
+    fn selective_attack_same_group_remote_sender_limit(&self, recipient: &PublicKey) -> usize {
+        let Some(group) = self.selective_attack_group(recipient) else {
+            return 0;
+        };
+        let Some((start, end)) = self.selective_attack_group_bounds(group) else {
+            return 0;
+        };
+        let local_group_size = end.saturating_sub(start);
+        self.coverage
+            .saturating_sub(1)
+            .min(local_group_size.saturating_sub(1))
+    }
+
     /// Returns how many cross-group senders should stay visible to the given recipient once the
-    /// attack starts, assuming we only keep the minimum number of remote senders needed to reach
-    /// the configured coverage threshold.
+    /// attack starts, after reserving the smallest same-group sender set needed to keep the total
+    /// visible author set at exactly `coverage` whenever possible.
     pub fn selective_attack_cross_group_sender_limit(&self, recipient: &PublicKey) -> usize {
         let Some(group) = self.selective_attack_group(recipient) else {
             return 0;
@@ -400,14 +413,27 @@ impl Committee {
         };
         let local_group_size = end.saturating_sub(start);
         let other_group_size = self.size().saturating_sub(local_group_size);
+        let same_group_remote_limit = self.selective_attack_same_group_remote_sender_limit(recipient);
         self.coverage
-            .saturating_sub(local_group_size)
+            .saturating_sub(1 + same_group_remote_limit)
             .min(other_group_size)
     }
 
-    /// Receiver-centric selective visibility rule used by the attack. Same-group messages are
-    /// always visible; cross-group messages are kept only from the smallest deterministic prefix
-    /// of senders needed to satisfy the configured coverage threshold.
+    fn selective_attack_rank_distance(rank: usize, start: usize, modulo: usize) -> usize {
+        if modulo == 0 {
+            0
+        } else if rank >= start {
+            rank - start
+        } else {
+            modulo - (start - rank)
+        }
+    }
+
+    /// Receiver-centric selective visibility rule used by the attack. Each recipient sees only the
+    /// minimum number of remote authors needed to reach `coverage` once its own author is counted:
+    /// first a deterministic rotating prefix of same-group peers, then a deterministic rotating
+    /// prefix of cross-group peers. Different recipients therefore keep different neighborhoods
+    /// while still seeing at most `coverage` total authors whenever possible.
     pub fn selective_attack_allows_sender_to_recipient(
         &self,
         sender: &PublicKey,
@@ -419,8 +445,26 @@ impl Committee {
         let Some(recipient_group) = self.selective_attack_group(recipient) else {
             return true;
         };
-        if sender_group == recipient_group {
+        let Some(recipient_rank) = self.selective_attack_rank_in_group(recipient) else {
             return true;
+        };
+        let Some(sender_rank) = self.selective_attack_rank_in_group(sender) else {
+            return true;
+        };
+
+        if sender_group == recipient_group {
+            let same_group_limit =
+                self.selective_attack_same_group_remote_sender_limit(recipient);
+            if same_group_limit == 0 {
+                return false;
+            }
+            let Some((start, end)) = self.selective_attack_group_bounds(recipient_group) else {
+                return true;
+            };
+            let local_group_size = end.saturating_sub(start);
+            let distance =
+                Self::selective_attack_rank_distance(sender_rank, recipient_rank, local_group_size);
+            return distance > 0 && distance <= same_group_limit;
         }
 
         let allowed_cross_group_senders =
@@ -428,10 +472,15 @@ impl Committee {
         if allowed_cross_group_senders == 0 {
             return false;
         }
-
-        self.selective_attack_rank_in_group(sender)
-            .map(|rank| rank < allowed_cross_group_senders)
-            .unwrap_or(true)
+        let Some((start, end)) = self.selective_attack_group_bounds(recipient_group) else {
+            return true;
+        };
+        let local_group_size = end.saturating_sub(start);
+        let other_group_size = self.size().saturating_sub(local_group_size);
+        let cross_group_start = recipient_rank % other_group_size.max(1);
+        let distance =
+            Self::selective_attack_rank_distance(sender_rank, cross_group_start, other_group_size);
+        distance < allowed_cross_group_senders
     }
 
     /// Returns the primary addresses of the target primary.
@@ -777,39 +826,77 @@ mod tests {
     }
 
     #[test]
-    fn selective_attack_keeps_same_group_and_minimal_cross_group_visibility() {
+    fn selective_attack_keeps_minimal_total_visibility_and_rotates_cross_group_peers() {
         let committee = attack_committee(10, 7);
+        let authorities: Vec<_> = committee.authorities.keys().copied().collect();
+        let recipient_a = authorities[0];
+        let recipient_b = authorities[1];
+
+        assert_eq!(committee.selective_attack_group_size(), 5);
+        assert_eq!(
+            committee.selective_attack_same_group_remote_sender_limit(&recipient_a),
+            4
+        );
+        assert_eq!(committee.selective_attack_cross_group_sender_limit(&recipient_a), 2);
+
+        assert!(committee.selective_attack_allows_sender_to_recipient(
+            &authorities[1],
+            &recipient_a
+        ));
+        assert!(committee.selective_attack_allows_sender_to_recipient(
+            &authorities[5],
+            &recipient_a
+        ));
+        assert!(committee.selective_attack_allows_sender_to_recipient(
+            &authorities[6],
+            &recipient_a
+        ));
+        assert!(!committee.selective_attack_allows_sender_to_recipient(
+            &authorities[7],
+            &recipient_a
+        ));
+
+        assert!(committee.selective_attack_allows_sender_to_recipient(
+            &authorities[6],
+            &recipient_b
+        ));
+        assert!(committee.selective_attack_allows_sender_to_recipient(
+            &authorities[7],
+            &recipient_b
+        ));
+        assert!(!committee.selective_attack_allows_sender_to_recipient(
+            &authorities[5],
+            &recipient_b
+        ));
+    }
+
+    #[test]
+    fn selective_attack_truncates_same_group_visibility_at_f_plus_one() {
+        let committee = attack_committee(10, 4);
         let authorities: Vec<_> = committee.authorities.keys().copied().collect();
         let recipient = authorities[0];
 
-        assert_eq!(committee.selective_attack_group_size(), 5);
-        assert_eq!(committee.selective_attack_cross_group_sender_limit(&recipient), 2);
-
+        assert_eq!(
+            committee.selective_attack_same_group_remote_sender_limit(&recipient),
+            3
+        );
+        assert_eq!(committee.selective_attack_cross_group_sender_limit(&recipient), 0);
         assert!(committee.selective_attack_allows_sender_to_recipient(
             &authorities[1],
             &recipient
         ));
         assert!(committee.selective_attack_allows_sender_to_recipient(
-            &authorities[5],
+            &authorities[2],
             &recipient
         ));
         assert!(committee.selective_attack_allows_sender_to_recipient(
-            &authorities[6],
+            &authorities[3],
             &recipient
         ));
         assert!(!committee.selective_attack_allows_sender_to_recipient(
-            &authorities[7],
+            &authorities[4],
             &recipient
         ));
-    }
-
-    #[test]
-    fn selective_attack_can_cut_all_cross_group_visibility_at_f_plus_one() {
-        let committee = attack_committee(10, 4);
-        let authorities: Vec<_> = committee.authorities.keys().copied().collect();
-        let recipient = authorities[0];
-
-        assert_eq!(committee.selective_attack_cross_group_sender_limit(&recipient), 0);
         assert!(!committee.selective_attack_allows_sender_to_recipient(
             &authorities[5],
             &recipient

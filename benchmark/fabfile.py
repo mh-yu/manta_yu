@@ -266,9 +266,9 @@ def cloudlab_remote(
     ctx,
     debug=False,
     sigma=1,
-    kappa=3,
-    reference=7,
-    coverage=7,
+    kappa=2,
+    reference=4,
+    coverage=4,
 
 
     allow_cross_step_weak_edges=False,  # 跨solid-step的weak edges
@@ -298,7 +298,7 @@ def cloudlab_remote(
     attack_start_secs=50,
     attack_duration_secs=30,
     attack_group_size=5,
-    attack_limit_headers=False,
+    attack_limit_headers=True,
     attack_limit_certificates=True,
 
     # 这是payload 的调度，第三轮和第二轮的顶点接收payload，目前以第三轮顶点优先，多余的给第二轮
@@ -307,7 +307,7 @@ def cloudlab_remote(
     adaptive_intermediate_spill_cap_digests=1,
 
     #会根据这些tag会自动生成目录，将运行结果分类 目录是 design_tag/network_tag/load_tag/
-    design_tag='experiment2_faulty',
+    design_tag='experiment2_attack',
     network_tag='geo',
     load_tag='balanced_50_50',
 ):
