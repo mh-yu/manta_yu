@@ -170,6 +170,22 @@ def experiment_to_cmd(
     load_tag: str,
 ) -> List[str]:
     fab = resolve_fab_launcher()
+    boolean_flags = [
+        (
+            "allow-cross-step-weak-edges",
+            exp.allow_cross_step_weak_edges,
+        ),
+        ("enable-fast-coin", exp.enable_fast_coin),
+        (
+            "solid-commit-trigger-on-solid-step",
+            exp.solid_commit_trigger_on_solid_step,
+        ),
+        ("enable-commit-recheck", exp.enable_commit_recheck),
+        (
+            "enable-adaptive-intermediate-spill",
+            exp.enable_adaptive_intermediate_spill,
+        ),
+    ]
     return [
         *fab,
         "cloudlab-remote",
@@ -177,17 +193,10 @@ def experiment_to_cmd(
         f"--kappa={exp.kappa}",
         f"--reference={exp.reference}",
         f"--coverage={exp.coverage}",
-        f"--allow-cross-step-weak-edges={str(exp.allow_cross_step_weak_edges).lower()}",
-        f"--enable-fast-coin={str(exp.enable_fast_coin).lower()}",
-        (
-            "--solid-commit-trigger-on-solid-step="
-            f"{str(exp.solid_commit_trigger_on_solid_step).lower()}"
-        ),
-        f"--enable-commit-recheck={str(exp.enable_commit_recheck).lower()}",
-        (
-            "--enable-adaptive-intermediate-spill="
-            f"{str(exp.enable_adaptive_intermediate_spill).lower()}"
-        ),
+        *[
+            f"--{flag_name}" if enabled else f"--no-{flag_name}"
+            for flag_name, enabled in boolean_flags
+        ],
         f"--design-tag={design_tag}",
         f"--network-tag={exp.network_tag}",
         f"--load-tag={load_tag}",

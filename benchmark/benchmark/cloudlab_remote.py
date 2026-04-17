@@ -1586,7 +1586,13 @@ SCRIPTEOF'''
                             design_tag = node_parameters.json.get('design_tag')
                             network_tag = node_parameters.json.get('network_tag')
                             load_tag = node_parameters.json.get('load_tag')
-                            run_label = f'cloudlab-n{n}-r{rate}-run{run+1}'
+                            sigma = node_parameters.json.get('sigma')
+                            kappa = node_parameters.json.get('kappa')
+                            reference = node_parameters.json.get('reference')
+                            run_label = (
+                                f'cloudlab-n{n}-r{rate}-run{run+1}'
+                                f'-s{sigma}-k{kappa}-ref{reference}'
+                            )
                             if design_tag:
                                 run_label += f'-tag-{design_tag}'
                             if trigger_attack is not None:

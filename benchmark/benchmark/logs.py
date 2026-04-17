@@ -297,6 +297,8 @@ class LogParser:
             if value is not None:
                 extra_config_lines += f' {label}: {value}\n'
 
+        consensus_batch_ids = self._committed_batch_ids(require_proposal=True)
+        committed_batch_ids = self._committed_batch_ids()
         consensus_latency = self._consensus_latency() * 1_000
         consensus_tps, consensus_bps, _ = self._consensus_throughput()
         end_to_end_tps, end_to_end_bps, duration = self._end_to_end_throughput()
@@ -307,6 +309,18 @@ class LogParser:
             sample_warning = (
                 f' Skipped end-to-end samples missing client send timestamps: '
                 f'{missing_end_to_end_samples:,}\n'
+            )
+
+        zero_result_reason = ''
+        if not committed_batch_ids:
+            zero_result_reason = (
+                ' Result note: no committed vertices were observed in the primary logs; '
+                'zero throughput/latency values below indicate no commits, not measured latency.\n'
+            )
+        elif not consensus_batch_ids:
+            zero_result_reason = (
+                ' Result note: committed vertices were observed, but no batches had both '
+                'proposal and commit timestamps, so consensus metrics are reported as 0.\n'
             )
 
         return (
@@ -333,6 +347,7 @@ class LogParser:
             f'{extra_config_lines}'
             '\n'
             ' + RESULTS:\n'
+            f'{zero_result_reason}'
             f' Consensus TPS: {round(consensus_tps):,} tx/s\n'
             f' Consensus BPS: {round(consensus_bps):,} B/s\n'
             f' Consensus latency: {round(consensus_latency):,} ms\n'
