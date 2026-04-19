@@ -1,0 +1,315 @@
+{
+  "ssh_key_path": "/home/ubuntu/.ssh/remote",
+  "servers": [
+    {
+      "hostname": "10.1.1.10",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.10"
+    },
+    {
+      "hostname": "10.1.1.11",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.11"
+    },
+    {
+      "hostname": "10.1.1.12",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.12"
+    },
+    {
+      "hostname": "10.1.1.13",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.13"
+    },
+    {
+      "hostname": "10.1.1.14",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.14"
+    },
+    {
+      "hostname": "10.1.1.15",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.15"
+    },
+    {
+      "hostname": "10.1.1.16",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.16"
+    },
+    {
+      "hostname": "10.1.1.17",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.17"
+    },
+    {
+      "hostname": "10.1.1.18",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.18"
+    },
+    {
+      "hostname": "10.1.1.19",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.19"
+    },
+    {
+      "hostname": "10.1.1.20",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.20"
+    },
+    {
+      "hostname": "10.1.1.21",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.21"
+    },
+    {
+      "hostname": "10.1.1.22",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.22"
+    },
+    {
+      "hostname": "10.1.1.23",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.23"
+    },
+    {
+      "hostname": "10.1.1.24",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.24"
+    },
+    {
+      "hostname": "10.1.1.25",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.25"
+    },
+    {
+      "hostname": "10.1.1.26",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.26"
+    },
+    {
+      "hostname": "10.1.1.27",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.27"
+    },
+    {
+      "hostname": "10.1.1.28",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.28"
+    },
+    {
+      "hostname": "10.1.1.29",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.29"
+    },
+    {
+      "hostname": "10.1.1.30",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.30"
+    },
+    {
+      "hostname": "10.1.1.31",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.31"
+    },
+    {
+      "hostname": "10.1.1.32",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.32"
+    },
+    {
+      "hostname": "10.1.1.33",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.33"
+    },
+    {
+      "hostname": "10.1.1.34",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.34"
+    },
+    {
+      "hostname": "10.1.1.35",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.35"
+    },
+    {
+      "hostname": "10.1.1.36",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.36"
+    },
+    {
+      "hostname": "10.1.1.37",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.37"
+    },
+    {
+      "hostname": "10.1.1.38",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.38"
+    },
+    {
+      "hostname": "10.1.1.39",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.1.1.39"
+    },
+    {
+      "hostname": "10.2.1.10",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.10"
+    },
+    {
+      "hostname": "10.2.1.11",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.11"
+    },
+    {
+      "hostname": "10.2.1.12",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.12"
+    },
+    {
+      "hostname": "10.2.1.13",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.13"
+    },
+    {
+      "hostname": "10.2.1.14",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.14"
+    },
+    {
+      "hostname": "10.2.1.15",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.15"
+    },
+    {
+      "hostname": "10.2.1.16",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.16"
+    },
+    {
+      "hostname": "10.2.1.17",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.17"
+    },
+    {
+      "hostname": "10.2.1.18",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.18"
+    },
+    {
+      "hostname": "10.2.1.19",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.19"
+    },
+    {
+      "hostname": "10.2.1.20",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.20"
+    },
+    {
+      "hostname": "10.2.1.21",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.21"
+    },
+    {
+      "hostname": "10.2.1.22",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.22"
+    },
+    {
+      "hostname": "10.2.1.23",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.23"
+    },
+    {
+      "hostname": "10.2.1.24",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.2.1.24"
+    },
+    {
+      "hostname": "10.3.1.10",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.3.1.10"
+    },
+    {
+      "hostname": "10.3.1.11",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.3.1.11"
+    },
+    {
+      "hostname": "10.3.1.12",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.3.1.12"
+    },
+    {
+      "hostname": "10.3.1.13",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.3.1.13"
+    },
+    {
+      "hostname": "10.3.1.14",
+      "username": "ubuntu",
+      "port": 22,
+      "description": "bench node 10.3.1.14"
+    }
+  ],
+  "setup_commands": [
+    "sudo apt-get update",
+    "sudo DEBIAN_FRONTEND=noninteractive bash -c 'apt-get -y install --reinstall linux-aws || { dpkg --remove --force-remove-reinstreq linux-aws || true; apt-get -y -f install; }'",
+    "sudo DEBIAN_FRONTEND=noninteractive apt-get -y -f install",
+    "sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a",
+    "sudo DEBIAN_FRONTEND=noninteractive apt-get -y -f install",
+    "sudo DEBIAN_FRONTEND=noninteractive apt-get -y install linux-aws",
+    "sudo DEBIAN_FRONTEND=noninteractive apt-get -y upgrade",
+    "sudo DEBIAN_FRONTEND=noninteractive apt-get -y autoremove"
+  ]
+}

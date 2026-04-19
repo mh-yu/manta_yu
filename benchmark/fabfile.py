@@ -144,34 +144,112 @@ def install(ctx):
         Print.error(e)
 
 
-@task
-def remote(ctx, debug=False):
-    ''' Run benchmarks on AWS '''
-    if Bench is None:
-        Print.error('AWS benchmark support is not available (remote dependencies may not be installed)')
-        return
+def build_manta_experiment_params(
+    sigma=2,
+    kappa=2,
+    reference=4,
+    coverage=7,
+    allow_cross_step_weak_edges=True,
+    enable_fast_coin=True,
+    solid_commit_trigger_on_solid_step=True,
+    enable_commit_recheck=True,
+    fast_coin_candidate_threshold=4,
+    solid_candidate_threshold=4,
+    enable_adaptive_intermediate_spill=True,
+    adaptive_intermediate_spill_trigger_digests=2,
+    adaptive_intermediate_spill_cap_digests=1,
+    design_tag='manta_data_forpaper3',
+    network_tag='geo',
+    load_tag='balanced_100_50',
+):
+    """Shared bench + node parameter dicts for CloudLab (`cloudlab_remote`) and AWS (`remote`)."""
+    allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
+    enable_fast_coin = _coerce_bool(enable_fast_coin)
+    solid_commit_trigger_on_solid_step = _coerce_bool(solid_commit_trigger_on_solid_step)
+    enable_commit_recheck = _coerce_bool(enable_commit_recheck)
+    enable_adaptive_intermediate_spill = _coerce_bool(enable_adaptive_intermediate_spill)
     bench_params = {
-        'faults': 3,
+        'faults': 0,
         'nodes': [10],
         'workers': 1,
         'collocate': True,
-        'rate': [10_000, 110_000],
+        'rate_type': 'balanced',
+        'rate': [40000, 60000, 80000, 100000, 110000, 120000, 140000],
         'tx_size': 512,
-        'duration': 300,
+        'duration': 120,
         'runs': 2,
     }
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 200,  # ms
+        'max_header_delay': 100,  # ms
         'gc_depth': 50,  # rounds
-        'sync_retry_delay': 10_000,  # ms
-        'sync_retry_nodes': 3,  # number of nodes
-        'batch_size': 500_000,  # bytes
-        'max_batch_delay': 200,  # ms
-        'solid_step_length': 2,
-        'solid_step_number': 1,
-        'reference': 3,
+        'sync_retry_delay': 1000,  # ms
+        'sync_retry_nodes': 7,  # number of nodes
+        'batch_size': 500000,  # bytes
+        'max_batch_delay': 50,  # ms
+        'sigma': sigma,
+        'kappa': kappa,
+        'reference': reference,
+        'coverage': coverage,
+        'allow_cross_step_weak_edges': allow_cross_step_weak_edges,
+        'enable_fast_coin': enable_fast_coin,
+        'solid_commit_trigger_on_solid_step': solid_commit_trigger_on_solid_step,
+        'enable_commit_recheck': enable_commit_recheck,
+        'fast_coin_candidate_threshold': int(fast_coin_candidate_threshold),
+        'solid_candidate_threshold': int(solid_candidate_threshold),
+        'enable_adaptive_intermediate_spill': enable_adaptive_intermediate_spill,
+        'adaptive_intermediate_spill_trigger_digests': int(adaptive_intermediate_spill_trigger_digests),
+        'adaptive_intermediate_spill_cap_digests': int(adaptive_intermediate_spill_cap_digests),
+        'design_tag': design_tag,
+        'network_tag': network_tag,
+        'load_tag': load_tag,
     }
+    return bench_params, node_params
+
+
+@task
+def remote(
+    ctx,
+    debug=False,
+    sigma=2,
+    kappa=2,
+    reference=4,
+    coverage=7,
+    allow_cross_step_weak_edges=True,
+    enable_fast_coin=True,
+    solid_commit_trigger_on_solid_step=True,
+    enable_commit_recheck=True,
+    fast_coin_candidate_threshold=4,
+    solid_candidate_threshold=4,
+    enable_adaptive_intermediate_spill=True,
+    adaptive_intermediate_spill_trigger_digests=2,
+    adaptive_intermediate_spill_cap_digests=1,
+    design_tag='manta_data_forpaper3',
+    network_tag='geo',
+    load_tag='balanced_100_50',
+):
+    ''' Run benchmarks on AWS — same experiment parameters as `cloudlab_remote`. '''
+    if Bench is None:
+        Print.error('AWS benchmark support is not available (remote dependencies may not be installed)')
+        return
+    bench_params, node_params = build_manta_experiment_params(
+        sigma=sigma,
+        kappa=kappa,
+        reference=reference,
+        coverage=coverage,
+        allow_cross_step_weak_edges=allow_cross_step_weak_edges,
+        enable_fast_coin=enable_fast_coin,
+        solid_commit_trigger_on_solid_step=solid_commit_trigger_on_solid_step,
+        enable_commit_recheck=enable_commit_recheck,
+        fast_coin_candidate_threshold=fast_coin_candidate_threshold,
+        solid_candidate_threshold=solid_candidate_threshold,
+        enable_adaptive_intermediate_spill=enable_adaptive_intermediate_spill,
+        adaptive_intermediate_spill_trigger_digests=adaptive_intermediate_spill_trigger_digests,
+        adaptive_intermediate_spill_cap_digests=adaptive_intermediate_spill_cap_digests,
+        design_tag=design_tag,
+        network_tag=network_tag,
+        load_tag=load_tag,
+    )
     try:
         Bench(ctx).run(bench_params, node_params, debug)
     except BenchError as e:
@@ -305,57 +383,24 @@ def cloudlab_remote(
     load_tag='balanced_100_50',
 ):
     ''' Run benchmarks on CloudLab '''
-    allow_cross_step_weak_edges = _coerce_bool(allow_cross_step_weak_edges)
-    enable_fast_coin = _coerce_bool(enable_fast_coin)
-    solid_commit_trigger_on_solid_step = _coerce_bool(solid_commit_trigger_on_solid_step)
-    enable_commit_recheck = _coerce_bool(enable_commit_recheck)
-    enable_adaptive_intermediate_spill = _coerce_bool(enable_adaptive_intermediate_spill)
-    bench_params = {
-        'faults': 0,
-        'nodes': [10],
-        'workers': 1,
-        'collocate': True,
-        'rate_type': 'balanced',
-        # 'rate': [110000,120000,140000],
-        # 'rate': [60000, 40000],
-        'rate': [40000, 60000, 80000, 100000, 110000,120000, 140000],
-        # 'rate': [110000],
-        'tx_size': 512,
-        'duration': 120,
-        'runs': 2,       
-    }
-
-    # manta 对以下参数比较敏感 可调整成 50/500_000/50   100/500_000/100  50/128_000/50 80/128_000/35 等等
-    # 下面这组在geo631表现还可以, 有时候跑的不稳，900左右是正常，如果超过1000了可能是波动或者这个参数没有调优
-    #  'max_header_delay': 80,  # ms
-    #  'batch_size': 500_000,  # bytes
-    # 'max_batch_delay': 35,  # ms
-    node_params = {
-        'header_size': 1_000,  # bytes
-        'max_header_delay': 100,  # ms
-        'gc_depth': 50,  # rounds
-        'sync_retry_delay': 1000,  # ms
-        'sync_retry_nodes': 7,  # number of nodes
-        'batch_size': 500000,  # bytes
-        'max_batch_delay': 50,  # ms
-        'sigma': sigma,
-        'kappa': kappa,
-        'reference': reference,
-        'coverage': coverage,
-        'allow_cross_step_weak_edges': allow_cross_step_weak_edges,
-        'enable_fast_coin': enable_fast_coin,
-        'solid_commit_trigger_on_solid_step': solid_commit_trigger_on_solid_step,
-        'enable_commit_recheck': enable_commit_recheck,
-        'fast_coin_candidate_threshold': int(fast_coin_candidate_threshold),
-        'solid_candidate_threshold': int(solid_candidate_threshold),
-        'enable_adaptive_intermediate_spill': enable_adaptive_intermediate_spill,
-        'adaptive_intermediate_spill_trigger_digests': int(adaptive_intermediate_spill_trigger_digests),
-        'adaptive_intermediate_spill_cap_digests': int(adaptive_intermediate_spill_cap_digests),
-        'design_tag': design_tag,
-        'network_tag': network_tag,
-        'load_tag': load_tag,
-        # 's': 0.99,
-    }
+    bench_params, node_params = build_manta_experiment_params(
+        sigma=sigma,
+        kappa=kappa,
+        reference=reference,
+        coverage=coverage,
+        allow_cross_step_weak_edges=allow_cross_step_weak_edges,
+        enable_fast_coin=enable_fast_coin,
+        solid_commit_trigger_on_solid_step=solid_commit_trigger_on_solid_step,
+        enable_commit_recheck=enable_commit_recheck,
+        fast_coin_candidate_threshold=fast_coin_candidate_threshold,
+        solid_candidate_threshold=solid_candidate_threshold,
+        enable_adaptive_intermediate_spill=enable_adaptive_intermediate_spill,
+        adaptive_intermediate_spill_trigger_digests=adaptive_intermediate_spill_trigger_digests,
+        adaptive_intermediate_spill_cap_digests=adaptive_intermediate_spill_cap_digests,
+        design_tag=design_tag,
+        network_tag=network_tag,
+        load_tag=load_tag,
+    )
     try:
         CloudLabBench(ctx).run(bench_params, node_params, debug)
     except BenchError as e:
