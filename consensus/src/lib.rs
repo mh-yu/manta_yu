@@ -203,8 +203,8 @@ impl Consensus {
             // Emit DAG visualization for extract_final_dag / extract_dag_out (full DAG per round).
             // self.visualize_dag(&state, round);
 
-            // Commit on rounds aligned with the next wave boundary, but warm up for two full
-            // waves first (same warmup duration as legacy Tusk). For a leader at round `r`,
+            // Commit on rounds aligned with the next wave boundary, but warm up for one full
+            // wave first. For a leader at round `r`,
             // the commit trigger happens at `r + solid_wave_length`, and support is taken from
             // the first round of the wave's last solid step (`r + solid_step_length`).
             let step_length = self.committee.solid_step_length();
@@ -212,7 +212,7 @@ impl Consensus {
             if step_length == 0 || wave_length == 0 {
                 continue;
             }
-            let first_check_round = 1u64.saturating_add(2 * wave_length);
+            let first_check_round = 1u64.saturating_add(wave_length);
             if round < first_check_round {
                 continue;
             }

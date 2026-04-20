@@ -84,7 +84,7 @@ fn make_round(
 }
 
 #[tokio::test]
-async fn does_not_commit_on_round_five_even_with_round_three_support_due_to_warmup() {
+async fn commits_round_one_on_round_five_after_one_wave_warmup() {
     let committee = mock_committee();
     let mut keys: Vec<_> = keys().into_iter().map(|(x, _)| x).collect();
     keys.sort();
@@ -135,11 +135,16 @@ async fn does_not_commit_on_round_five_even_with_round_three_support_due_to_warm
     let (_, trigger) = mock_certificate(keys[0], 5, parents, BTreeSet::new());
     tx_waiter.send(trigger).await.unwrap();
 
-    assert!(timeout(Duration::from_millis(100), rx_output.recv()).await.is_err());
+    let committed = timeout(Duration::from_secs(1), rx_output.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(committed.round(), 1);
+    assert_eq!(committed.origin(), leader);
 }
 
 #[tokio::test]
-async fn commits_round_five_leader_on_round_nine_after_warmup() {
+async fn does_not_commit_on_round_five_without_round_three_support() {
     let committee = mock_committee();
     let mut keys: Vec<_> = keys().into_iter().map(|(x, _)| x).collect();
     keys.sort();
@@ -163,30 +168,22 @@ async fn commits_round_five_leader_on_round_nine_after_warmup() {
     let (round_2, parents) = make_round(2, &parents, &keys, &BTreeSet::new());
     certificates.extend(round_2);
 
+    let (round_3, parents) = make_round(3, &parents, &keys, &BTreeSet::new());
+    certificates.extend(round_3);
+
     let support_round_1 = vec![leader_round_1_digest]
         .into_iter()
         .collect::<BTreeSet<_>>();
-    let (round_3, parents) = make_round(3, &parents, &keys, &support_round_1);
-    certificates.extend(round_3);
-
-    let (round_4, parents) = make_round(4, &parents, &keys, &BTreeSet::new());
+    let (round_4, parents) = make_round(4, &parents, &keys, &support_round_1);
     certificates.extend(round_4);
 
     let (round_5, parents) = make_round(5, &parents, &keys, &BTreeSet::new());
-    let leader_round_5_digest = round_5
-        .iter()
-        .find(|certificate| certificate.origin() == leader)
-        .unwrap()
-        .digest();
     certificates.extend(round_5);
 
     let (round_6, parents) = make_round(6, &parents, &keys, &BTreeSet::new());
     certificates.extend(round_6);
 
-    let support_round_5 = vec![leader_round_5_digest]
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    let (round_7, parents) = make_round(7, &parents, &keys, &support_round_5);
+    let (round_7, parents) = make_round(7, &parents, &keys, &BTreeSet::new());
     certificates.extend(round_7);
 
     let (round_8, parents) = make_round(8, &parents, &keys, &BTreeSet::new());
@@ -210,20 +207,8 @@ async fn commits_round_five_leader_on_round_nine_after_warmup() {
 
     assert!(timeout(Duration::from_millis(100), rx_output.recv()).await.is_err());
 
-    let (_, trigger) = mock_certificate(keys[0], 9, parents, BTreeSet::new());
+    let (_, trigger) = mock_certificate(keys[0], 5, parents, BTreeSet::new());
     tx_waiter.send(trigger).await.unwrap();
 
-    let mut saw_round_five_leader = false;
-    for _ in 0..(keys.len() * 5) {
-        let committed = timeout(Duration::from_secs(1), rx_output.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        if committed.round() == 5 && committed.origin() == leader {
-            saw_round_five_leader = true;
-            break;
-        }
-    }
-
-    assert!(saw_round_five_leader);
+    assert!(timeout(Duration::from_millis(100), rx_output.recv()).await.is_err());
 }
