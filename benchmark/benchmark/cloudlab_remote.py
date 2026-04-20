@@ -1164,8 +1164,9 @@ class CloudLabBench:
         return committee
     
     def _logs(self, committee, faults, max_workers=1):
-        """Download logs from all hosts using download_logs.py"""
+        """Download logs only from hosts used in the current run."""
         Print.info('Downloading logs...')
+        node_indices = list(range(len(committee.primary_addresses(faults))))
         
         # Get benchmark directory (parent of benchmark/benchmark/)
         benchmark_dir = Path(__file__).parent.parent
@@ -1178,12 +1179,34 @@ class CloudLabBench:
             Path(PathMaker.logs_path()).mkdir(parents=True, exist_ok=True)
             return LogParser.process(PathMaker.logs_path(), faults=faults)
         
-        # Run download_logs.py to download all logs
+        # Clear the scratch logs directory so stale logs from other hosts
+        # cannot leak into the parser for the current run.
+        logs_dir = benchmark_dir / PathMaker.logs_path()
+        try:
+            import shutil
+            if logs_dir.exists():
+                shutil.rmtree(logs_dir)
+            logs_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            Print.warn(f'⚠ Failed to reset local logs directory {logs_dir}: {e}')
+
+        # Run download_logs.py to download only the nodes used in this run.
         try:
             import sys
-            Print.info(f'Running download_logs.py with max_workers={max_workers}...')
+            node_arg = ','.join(str(i) for i in node_indices)
+            Print.info(
+                f'Running download_logs.py with max_workers={max_workers} '
+                f'for nodes={node_arg}...'
+            )
             result = subprocess.run(
-                [sys.executable, str(download_logs_script), '--max-workers', str(max_workers)],
+                [
+                    sys.executable,
+                    str(download_logs_script),
+                    '--max-workers',
+                    str(max_workers),
+                    '--nodes',
+                    node_arg,
+                ],
                 cwd=str(benchmark_dir),
                 capture_output=False,  # Show output in real-time
                 text=True
