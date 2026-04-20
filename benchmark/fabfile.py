@@ -151,7 +151,7 @@ def remote(ctx, debug=False):
         'network_tag': 'geo',
         'rate': [80000],
         'tx_size': 512,
-        'duration': 60,
+        'duration': 120,
         'runs': 1,
     }
     node_params = {
