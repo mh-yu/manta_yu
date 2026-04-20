@@ -406,6 +406,45 @@ class Bench:
                             network_tag=node_parameters.json.get('network_tag'),
                             load_tag=node_parameters.json.get('load_tag'),
                         )
+                        PathMaker.update_run_metadata(
+                            {
+                                'benchmark_type': 'remote',
+                                'bench_params': {
+                                    'faults': bench_parameters.faults,
+                                    'nodes': n,
+                                    'workers': bench_parameters.workers,
+                                    'collocate': bench_parameters.collocate,
+                                    'rate': r,
+                                    'rate_type': getattr(bench_parameters, 'rate_type', None),
+                                    'tx_size': bench_parameters.tx_size,
+                                    'duration': bench_parameters.duration,
+                                    'run': i + 1,
+                                },
+                                'node_params': {
+                                    key: value
+                                    for key, value in node_parameters.json.items()
+                                    if key in (
+                                        'sigma',
+                                        'kappa',
+                                        'reference',
+                                        'coverage',
+                                        'allow_cross_step_weak_edges',
+                                        'enable_fast_coin',
+                                        'solid_commit_trigger_on_solid_step',
+                                        'enable_commit_recheck',
+                                        'fast_coin_candidate_threshold',
+                                        'solid_candidate_threshold',
+                                        'enable_adaptive_intermediate_spill',
+                                        'adaptive_intermediate_spill_trigger_digests',
+                                        'adaptive_intermediate_spill_cap_digests',
+                                        'design_tag',
+                                        'network_tag',
+                                        'load_tag',
+                                    )
+                                },
+                            },
+                            run_dir=run_dir,
+                        )
                         Print.info(f'Run outputs directory: {run_dir}')
                         self._run_single(
                             r, committee_copy, bench_parameters, debug
