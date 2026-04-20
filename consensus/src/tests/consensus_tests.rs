@@ -164,6 +164,7 @@ async fn commit_on_support_round_without_waiting_for_trigger_round() {
         .send(support_round_certificates.pop_front().unwrap())
         .await
         .unwrap();
+    assert!(timeout(Duration::from_millis(100), rx_output.recv()).await.is_err());
     tx_waiter
         .send(support_round_certificates.pop_front().unwrap())
         .await

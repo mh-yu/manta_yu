@@ -203,6 +203,14 @@ impl Consensus {
         Some((support_round + step_length - wave_length, support_round))
     }
 
+    fn early_commit_threshold_reached(&self, state: &State, support_round: Round) -> bool {
+        state
+            .dag
+            .get(&support_round)
+            .map(|round_map| round_map.len() >= self.committee.validity_threshold() as usize)
+            .unwrap_or(false)
+    }
+
     async fn try_commit(
         &mut self,
         state: &mut State,
@@ -456,9 +464,11 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
             // self.visualize_dag(&state, round);
 
             if let Some((leader_round, support_round)) = self.early_commit_candidate(round) {
-                let _ = self
-                    .try_commit(&mut state, round, leader_round, support_round)
-                    .await;
+                if self.early_commit_threshold_reached(&state, support_round) {
+                    let _ = self
+                        .try_commit(&mut state, round, leader_round, support_round)
+                        .await;
+                }
             }
 
             // Narwhal-style commit loop adapted to solid waves:
