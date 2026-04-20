@@ -5,8 +5,9 @@ use crypto::{generate_keypair, SecretKey};
 use primary::Header;
 use rand::rngs::StdRng;
 use rand::SeedableRng as _;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use tokio::sync::mpsc::channel;
+use tokio::time::{timeout, Duration};
 
 // Fixture
 fn keys() -> Vec<(PublicKey, SecretKey)> {
@@ -33,6 +34,10 @@ pub fn mock_committee() -> Committee {
                 )
             })
             .collect(),
+        sigma: 1,
+        kappa: 2,
+        reference: 3,
+        coverage: 3,
     }
 }
 
@@ -42,11 +47,16 @@ fn mock_certificate(
     round: Round,
     parents: BTreeSet<Digest>,
 ) -> (Digest, Certificate) {
+    let parent_vertices: HashSet<_> = parents.iter().cloned().collect();
     let certificate = Certificate {
         header: Header {
             author: origin,
             round,
             parents,
+            solid_step_vertices: parent_vertices.clone(),
+            solid_step_vertices_merged: parent_vertices.clone(),
+            solid_wave_vertices: parent_vertices.clone(),
+            solid_wave_vertices_merged: parent_vertices,
             ..Header::default()
         },
         ..Certificate::default()
@@ -97,8 +107,8 @@ async fn commit_one() {
 
     // Spawn the consensus engine and sink the primary channel.
     let (tx_waiter, rx_waiter) = channel(1);
-    let (tx_primary, mut rx_primary) = channel(1);
-    let (tx_output, mut rx_output) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(32);
+    let (tx_output, mut rx_output) = channel(32);
     Consensus::spawn(
         mock_committee(),
         /* gc_depth */ 50,
@@ -124,6 +134,55 @@ async fn commit_one() {
     assert_eq!(certificate.round(), 2);
 }
 
+#[tokio::test]
+async fn commit_on_support_round_without_waiting_for_trigger_round() {
+    let keys: Vec<_> = keys().into_iter().map(|(x, _)| x).collect();
+    let genesis = Certificate::genesis(&mock_committee())
+        .iter()
+        .map(|x| x.digest())
+        .collect::<BTreeSet<_>>();
+    let (mut certificates, next_parents) = make_certificates(1, 2, &genesis, &keys);
+    let (mut support_round_certificates, _) = make_certificates(3, 3, &next_parents, &keys);
+
+    let (tx_waiter, rx_waiter) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(32);
+    let (tx_output, mut rx_output) = channel(8);
+    Consensus::spawn(
+        mock_committee(),
+        /* gc_depth */ 50,
+        rx_waiter,
+        tx_primary,
+        tx_output,
+    );
+    tokio::spawn(async move { while rx_primary.recv().await.is_some() {} });
+
+    while let Some(certificate) = certificates.pop_front() {
+        tx_waiter.send(certificate).await.unwrap();
+    }
+
+    tx_waiter
+        .send(support_round_certificates.pop_front().unwrap())
+        .await
+        .unwrap();
+    tx_waiter
+        .send(support_round_certificates.pop_front().unwrap())
+        .await
+        .unwrap();
+
+    for _ in 1..=4 {
+        let certificate = timeout(Duration::from_secs(1), rx_output.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(certificate.round(), 1);
+    }
+    let certificate = timeout(Duration::from_secs(1), rx_output.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(certificate.round(), 2);
+}
+
 // Run for 8 dag rounds with one dead node node (that is not a leader). We should commit the leaders of
 // rounds 2, 4, and 6.
 #[tokio::test]
@@ -142,8 +201,8 @@ async fn dead_node() {
 
     // Spawn the consensus engine and sink the primary channel.
     let (tx_waiter, rx_waiter) = channel(1);
-    let (tx_primary, mut rx_primary) = channel(1);
-    let (tx_output, mut rx_output) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(32);
+    let (tx_output, mut rx_output) = channel(32);
     Consensus::spawn(
         mock_committee(),
         /* gc_depth */ 50,
@@ -230,8 +289,8 @@ async fn not_enough_support() {
 
     // Spawn the consensus engine and sink the primary channel.
     let (tx_waiter, rx_waiter) = channel(1);
-    let (tx_primary, mut rx_primary) = channel(1);
-    let (tx_output, mut rx_output) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(32);
+    let (tx_output, mut rx_output) = channel(32);
     Consensus::spawn(
         mock_committee(),
         /* gc_depth */ 50,
@@ -293,8 +352,8 @@ async fn missing_leader() {
 
     // Spawn the consensus engine and sink the primary channel.
     let (tx_waiter, rx_waiter) = channel(1);
-    let (tx_primary, mut rx_primary) = channel(1);
-    let (tx_output, mut rx_output) = channel(1);
+    let (tx_primary, mut rx_primary) = channel(32);
+    let (tx_output, mut rx_output) = channel(32);
     Consensus::spawn(
         mock_committee(),
         /* gc_depth */ 50,

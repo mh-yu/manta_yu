@@ -147,11 +147,11 @@ def remote(ctx, debug=False):
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'design_tag': 'manta_experiment3_test',
+        'design_tag': 'tusk-m_experiment3',
         'network_tag': 'geo',
         'rate': [80000],
         'tx_size': 512,
-        'duration': 120,
+        'duration': 60,
         'runs': 1,
     }
     node_params = {
@@ -162,7 +162,7 @@ def remote(ctx, debug=False):
         'sync_retry_nodes': 33,  # number of nodes
         'batch_size': 500000,  # bytes
         'max_batch_delay': 50,  # ms
-        'sigma': 2,
+        'sigma': 1,
         'kappa': 2,
         'reference': 17,
         'coverage': 33,
