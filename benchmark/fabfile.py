@@ -158,7 +158,7 @@ def build_manta_experiment_params(
     enable_adaptive_intermediate_spill=True,
     adaptive_intermediate_spill_trigger_digests=2,
     adaptive_intermediate_spill_cap_digests=1,
-    design_tag='manta_data_forpaper3',
+    design_tag='manta_data_EXP3',
     network_tag='geo',
     load_tag='balanced_100_50',
 ):
@@ -170,14 +170,15 @@ def build_manta_experiment_params(
     enable_adaptive_intermediate_spill = _coerce_bool(enable_adaptive_intermediate_spill)
     bench_params = {
         'faults': 0,
-        'nodes': [10],
+        'nodes': [50],
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'rate': [40000, 60000, 80000, 100000, 110000, 120000, 140000],
+        'rate': 40000,
+        # 'rate': [40000, 60000, 80000, 100000, 110000, 120000, 140000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 2,
+        'runs': 1,
     }
     node_params = {
         'header_size': 1_000,  # bytes
