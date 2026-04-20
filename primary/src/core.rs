@@ -277,13 +277,8 @@ impl Core {
             DagError::MalformedHeader(header.id.clone())
         );
 
-        if let Some(target_round) = self.committee.wave_back_link_target_round(round) {
-            let link_stake = author_bitmap_stake(&self.committee, &expected_back_link_bitmap);
-            ensure!(
-                link_stake >= self.committee.quorum_threshold(),
-                DagError::HeaderRequiresWaveLink(header.id.clone(), target_round)
-            );
-        }
+        // Keep back-link summaries for observability, but do not block
+        // wave-boundary headers on back-link quorum while isolating its impact.
 
         // Ensure we have the payload. If we don't, the synchronizer will ask our workers to get it, and then
         // reschedule processing of this header once we have it.
@@ -571,31 +566,8 @@ impl Core {
                 .append(certificate.clone(), &self.committee)?
             {
                 let proposal_round = target_round + 1;
-                if let Some(back_link_round) = self.committee.wave_back_link_target_round(proposal_round) {
-                    if parents.wave_back_link_target_round != back_link_round {
-                        debug!(
-                            "Delaying proposer unlock for round {}: parent bitmap tracks round {} instead of {}",
-                            proposal_round,
-                            parents.wave_back_link_target_round,
-                            back_link_round,
-                        );
-                        continue;
-                    }
-                    let link_stake = author_bitmap_stake(
-                        &self.committee,
-                        &parents.wave_back_link_author_bitmap,
-                    );
-                    if link_stake < self.committee.quorum_threshold() {
-                        debug!(
-                            "Delaying proposer unlock for round {}: only {} stake links to round {} (need {})",
-                            proposal_round,
-                            link_stake,
-                            back_link_round,
-                            self.committee.quorum_threshold(),
-                        );
-                        continue;
-                    }
-                }
+                // Likewise, do not stall proposer unlock on wave-back-link
+                // readiness during this experiment.
 
                 // Send it to the `Proposer`.
                 self.tx_proposer

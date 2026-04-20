@@ -216,7 +216,7 @@ def remote(
     kappa=2,
     reference=17,
     coverage=33,
-    allow_cross_step_weak_edges=False,
+    allow_cross_step_weak_edges=True,
     enable_fast_coin=False,
     solid_commit_trigger_on_solid_step=False,
     enable_commit_recheck=False,
