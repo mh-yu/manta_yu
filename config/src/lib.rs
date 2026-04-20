@@ -280,9 +280,11 @@ impl Committee {
         (self.sigma) as u64
     }
 
-    /// Returns whether the provided round is the first round of a solid step.
+    /// Returns whether the provided round is aligned with the start of a solid
+    /// step after bootstrap. With step length `L`, aligned rounds are
+    /// `1 + m * L` for `m >= 1`.
     pub fn is_solid_step(&self, round: u64) -> bool {
-        round > 1 && round % self.solid_step_length() == 0
+        round > 1 && (round - 1) % self.solid_step_length() == 0
     }
 }
 
