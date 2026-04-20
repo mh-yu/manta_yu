@@ -162,7 +162,7 @@ def remote(ctx, debug=False):
         'sync_retry_nodes': 33,  # number of nodes
         'batch_size': 500000,  # bytes
         'max_batch_delay': 50,  # ms
-        'sigma': 2,
+        'sigma': 1,
         'kappa': 2,
         'reference': 17,
         'coverage': 33,

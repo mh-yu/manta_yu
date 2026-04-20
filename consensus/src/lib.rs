@@ -203,20 +203,24 @@ impl Consensus {
             // Emit DAG visualization for extract_final_dag / extract_dag_out (full DAG per round).
             // self.visualize_dag(&state, round);
 
-            // Narwhal-style commit loop adapted to solid waves:
-            // only commit on solid-wave boundary rounds, and validate the leader from the
-            // previous solid wave using the previous solid-step round as support.
+            // Commit on rounds aligned with the next wave boundary, but warm up for two full
+            // waves first (same warmup duration as legacy Tusk). For a leader at round `r`,
+            // the commit trigger happens at `r + solid_wave_length`, and support is taken from
+            // the first round of the wave's last solid step (`r + solid_step_length`).
             let step_length = self.committee.solid_step_length();
             let wave_length = self.committee.solid_wave_length();
-            let r = round - step_length;
-            let leader_round = r - wave_length;
-            let support_round = r - step_length;
-            if r % wave_length != 0 {
+            if step_length == 0 || wave_length == 0 {
                 continue;
             }
-            if r < 2 * wave_length {
+            let first_check_round = 1u64.saturating_add(2 * wave_length);
+            if round < first_check_round {
                 continue;
             }
+            if (round - 1) % wave_length != 0 {
+                continue;
+            }
+            let leader_round = round - wave_length;
+            let support_round = leader_round + step_length;
             if leader_round <= state.last_committed_leader_round {
                 debug!(
                     "Skipping leader_round {} because last_committed_leader_round={}",
@@ -465,30 +469,37 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
         dag.get(&round).map(|x| x.get(&leader)).flatten()
     }
 
-    /// Order leader certificates to commit, mirroring Narwhal's `order_leaders` with step
-    /// `solid_wave_length`: walk rounds from `last_committed_leader_round + solid_wave_length`
-    /// up to (exclusive) the current leader round, stepping backward by `solid_wave_length`, and
-    /// chain predecessors via `linked`.
+    /// Order leader certificates to commit, with leader rounds aligned to
+    /// `1 + m * solid_wave_length`. Walk backward by `solid_wave_length` and chain
+    /// predecessors via `linked`.
     fn order_leaders(&self, leader: &Certificate, state: &State) -> Vec<Certificate> {
-        let wave = self.committee.solid_wave_length() as usize;
+        let wave = self.committee.solid_wave_length();
         if wave == 0 {
             return vec![leader.clone()];
         }
-        let start = state
-            .last_committed_leader_round
-            .saturating_add(wave as u64);
         let end_round = leader.round();
         let mut to_commit = vec![leader.clone()];
         let mut cur = leader;
-        for r in (start..end_round).rev().step_by(wave) {
+        let mut r = end_round.saturating_sub(wave);
+        while r > state.last_committed_leader_round {
             let (_, prev_leader) = match self.leader(r, &state.dag) {
                 Some(x) => x,
-                None => continue,
+                None => {
+                    if r <= wave {
+                        break;
+                    }
+                    r = r.saturating_sub(wave);
+                    continue;
+                }
             };
             if self.linked(cur, prev_leader, state) {
                 to_commit.push(prev_leader.clone());
                 cur = prev_leader;
             }
+            if r <= wave {
+                break;
+            }
+            r = r.saturating_sub(wave);
         }
         debug!(
             "order_leaders: chain_len={} tip_round={} last_committed_leader_round={} gap_rounds={} step={}",
