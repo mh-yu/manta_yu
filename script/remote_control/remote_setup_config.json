@@ -303,13 +303,7 @@
     }
   ],
   "setup_commands": [
-    "sudo apt-get update",
-    "sudo DEBIAN_FRONTEND=noninteractive bash -c 'apt-get -y install --reinstall linux-aws || { dpkg --remove --force-remove-reinstreq linux-aws || true; apt-get -y -f install; }'",
-    "sudo DEBIAN_FRONTEND=noninteractive apt-get -y -f install",
-    "sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a",
-    "sudo DEBIAN_FRONTEND=noninteractive apt-get -y -f install",
-    "sudo DEBIAN_FRONTEND=noninteractive apt-get -y install linux-aws",
-    "sudo DEBIAN_FRONTEND=noninteractive apt-get -y upgrade",
-    "sudo DEBIAN_FRONTEND=noninteractive apt-get -y autoremove"
+    "rm -rf manta_yu",
+    "git clone -b manta_cert2_50 https://github.com/mh-yu/manta_yu.git"
   ]
 }
