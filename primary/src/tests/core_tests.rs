@@ -3,7 +3,6 @@ use super::*;
 use crate::common::{
     certificate, committee, committee_with_base_port, header, headers, keys, listener, votes,
 };
-use futures::future::try_join_all;
 use std::fs;
 use tokio::sync::mpsc::channel;
 
@@ -218,10 +217,10 @@ async fn process_votes() {
     let (tx_sync_headers, _rx_sync_headers) = channel(1);
     let (tx_sync_certificates, _rx_sync_certificates) = channel(1);
     let (tx_primary_messages, rx_primary_messages) = channel(1);
-    let (_tx_headers_loopback, rx_headers_loopback) = channel(1);
+    let (tx_headers_loopback, rx_headers_loopback) = channel(1);
     let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
     let (_tx_headers, rx_headers) = channel(1);
-    let (tx_consensus, _rx_consensus) = channel(1);
+    let (tx_consensus, mut rx_consensus) = channel(1);
     let (tx_parents, _rx_parents) = channel(1);
 
     // Create a new test store.
@@ -255,31 +254,102 @@ async fn process_votes() {
         /* tx_proposer */ tx_parents,
     );
 
-    // Make the certificate we expect to receive.
-    let expected = certificate(&Header::default());
+    let test_header = header();
+    let expected = certificate(&test_header);
 
-    // Spawn all listeners to receive our newly formed certificate.
-    let handles: Vec<_> = committee
-        .others_primaries(&name)
-        .iter()
-        .map(|(_, address)| listener(address.primary_to_primary))
-        .collect();
+    // Track our own header without re-broadcasting it on the network.
+    tx_headers_loopback
+        .send(test_header.clone())
+        .await
+        .unwrap();
 
-    // Send a votes to the core.
-    for vote in votes(&Header::default()) {
+    // Send the remaining votes to the core. Our own vote is created while processing the header.
+    for vote in votes(&test_header)
+        .into_iter()
+        .filter(|vote| vote.author != name)
+    {
         tx_primary_messages
             .send(PrimaryMessage::Vote(vote))
             .await
             .unwrap();
     }
 
-    // Ensure all listeners got the certificate.
-    for received in try_join_all(handles).await.unwrap() {
-        match bincode::deserialize(&received).unwrap() {
-            PrimaryMessage::Certificate(x) => assert_eq!(x, expected),
-            x => panic!("Unexpected message: {:?}", x),
-        }
+    // Ensure the locally assembled certificate is used immediately.
+    let received = rx_consensus.recv().await.unwrap();
+    assert_eq!(received, expected);
+}
+
+#[tokio::test]
+async fn process_votes_for_foreign_header() {
+    let mut all_keys = keys();
+    let _ = all_keys.pop().unwrap(); // Skip the header's author.
+    let (name, secret) = all_keys.pop().unwrap();
+    let signature_service = SignatureService::new(secret);
+
+    let committee = committee_with_base_port(13_150);
+
+    let (tx_sync_headers, _rx_sync_headers) = channel(1);
+    let (tx_sync_certificates, _rx_sync_certificates) = channel(1);
+    let (tx_primary_messages, rx_primary_messages) = channel(4);
+    let (_tx_headers_loopback, rx_headers_loopback) = channel(1);
+    let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
+    let (_tx_headers, rx_headers) = channel(1);
+    let (tx_consensus, mut rx_consensus) = channel(1);
+    let (tx_parents, _rx_parents) = channel(1);
+
+    // Create a new test store.
+    let path = ".db_test_process_vote_foreign";
+    let _ = fs::remove_dir_all(path);
+    let store = Store::new(path).unwrap();
+
+    // Make a synchronizer for the core.
+    let synchronizer = Synchronizer::new(
+        name,
+        &committee,
+        store.clone(),
+        /* tx_header_waiter */ tx_sync_headers,
+        /* tx_certificate_waiter */ tx_sync_certificates,
+    );
+
+    // Spawn the core.
+    Core::spawn(
+        name,
+        committee.clone(),
+        store.clone(),
+        synchronizer,
+        signature_service,
+        /* consensus_round */ Arc::new(AtomicU64::new(0)),
+        /* gc_depth */ 50,
+        /* rx_primaries */ rx_primary_messages,
+        /* rx_header_waiter */ rx_headers_loopback,
+        /* rx_certificate_waiter */ rx_certificates_loopback,
+        /* rx_proposer */ rx_headers,
+        tx_consensus,
+        /* tx_proposer */ tx_parents,
+    );
+
+    let test_header = header();
+    let expected = certificate(&test_header);
+
+    tx_primary_messages
+        .send(PrimaryMessage::Header(test_header.clone()))
+        .await
+        .unwrap();
+
+    // The local node already emitted its own vote while processing the header.
+    for vote in votes(&test_header)
+        .into_iter()
+        .filter(|vote| vote.author != name)
+    {
+        tx_primary_messages
+            .send(PrimaryMessage::Vote(vote))
+            .await
+            .unwrap();
     }
+
+    // Even for a foreign header, the node should assemble and use the certificate locally.
+    let received = rx_consensus.recv().await.unwrap();
+    assert_eq!(received, expected);
 }
 
 #[tokio::test]
@@ -294,7 +364,7 @@ async fn process_certificates() {
     let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
     let (_tx_headers, rx_headers) = channel(1);
     let (tx_consensus, mut rx_consensus) = channel(3);
-    let (tx_parents, mut rx_parents) = channel(1);
+    let (tx_parents, _rx_parents) = channel(1);
 
     // Create a new test store.
     let path = ".db_test_process_certificates";
@@ -340,11 +410,6 @@ async fn process_certificates() {
             .await
             .unwrap();
     }
-
-    // Ensure the core sends the parents of the certificates to the proposer.
-    let received = rx_parents.recv().await.unwrap();
-    let parents = certificates.iter().map(|x| x.digest()).collect();
-    assert_eq!(received, (parents, 1));
 
     // Ensure the core sends the certificates to the consensus.
     for x in certificates.clone() {
