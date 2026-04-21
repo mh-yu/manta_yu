@@ -320,7 +320,7 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3, enable_wait=True):
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'rate': [20000,40000],
+        'rate': [80000],
         # 'rate': [80000, 100000, 120000, 140000],
         'tx_size': 512,
         'duration': 120,
