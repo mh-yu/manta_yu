@@ -97,6 +97,12 @@ impl Header {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct HeaderBundle {
+    pub header: Header,
+    pub parent_certificates: Vec<Certificate>,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProposalParents {
     pub parents: Vec<Digest>,

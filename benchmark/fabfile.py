@@ -316,11 +316,11 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3, enable_wait=True):
     ''' Run benchmarks on CloudLab '''
     bench_params = {
         'faults': 0,
-        'nodes': [10],
+        'nodes': [50],
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'rate': [60000],
+        'rate': [20000,40000],
         # 'rate': [80000, 100000, 120000, 140000],
         'tx_size': 512,
         'duration': 120,
@@ -331,15 +331,15 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3, enable_wait=True):
     node_params = {
         'header_size': 1_000,  # bytes
         'max_header_delay': 50,  # ms
-        'gc_depth': 50,  # rounds
+        'gc_depth': 500,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 7,  # number of nodes
         'batch_size': 500_000,  # bytes
         'max_batch_delay': 50,  # ms
         'sigma': 1,
         'kappa': 3,
-        'reference': 4,
-        'coverage': 7,
+        'reference': 33,
+        'coverage': 33,
         's': 0.99,
         'enable_wait': _as_bool(enable_wait),
     }

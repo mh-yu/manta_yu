@@ -3,6 +3,7 @@ use super::*;
 use crate::common::{
     certificate, committee, committee_with_base_port, header, headers, keys, listener, votes,
 };
+use crate::messages::HeaderBundle;
 use crypto::Signature;
 use std::{collections::HashSet, fs};
 use tokio::sync::mpsc::channel;
@@ -148,6 +149,111 @@ async fn process_header_missing_parent() {
 
     // Ensure the header is not stored.
     assert!(store.read(id.to_vec()).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn process_header_bundle_supplies_missing_parents() {
+    let mut all_keys = keys();
+    let (header_author, header_secret) = all_keys.pop().unwrap();
+    let (name, secret) = all_keys.pop().unwrap();
+    let signature_service = SignatureService::new(secret);
+
+    let committee = committee_with_base_port(13_500);
+
+    let (tx_sync_headers, _rx_sync_headers) = channel(1);
+    let (tx_sync_certificates, _rx_sync_certificates) = channel(1);
+    let (tx_primary_messages, rx_primary_messages) = channel(8);
+    let (_tx_headers_loopback, rx_headers_loopback) = channel(1);
+    let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
+    let (_tx_headers, rx_headers) = channel(1);
+    let (tx_consensus, mut rx_consensus) = channel(8);
+    let (tx_parents, _rx_parents) = channel(2);
+
+    let path = ".db_test_process_header_bundle_supplies_missing_parents";
+    let _ = fs::remove_dir_all(path);
+    let mut store = Store::new(path).unwrap();
+
+    let synchronizer = Synchronizer::new(
+        name,
+        &committee,
+        store.clone(),
+        tx_sync_headers,
+        tx_sync_certificates,
+    );
+
+    Core::spawn(
+        name,
+        committee.clone(),
+        store.clone(),
+        synchronizer,
+        signature_service,
+        Arc::new(AtomicU64::new(0)),
+        50,
+        true,
+        rx_primary_messages,
+        rx_headers_loopback,
+        rx_certificates_loopback,
+        rx_headers,
+        tx_consensus,
+        tx_parents,
+    );
+
+    let parent_certificates: Vec<_> = headers()
+        .into_iter()
+        .take(3)
+        .map(|parent_header| certificate(&parent_header))
+        .collect();
+    let bundled_header = {
+        let header = Header {
+            author: header_author,
+            round: 2,
+            parents: parent_certificates.iter().map(|certificate| certificate.digest()).collect(),
+            ..Header::default()
+        };
+        Header {
+            id: header.digest(),
+            signature: Signature::new(&header.digest(), &header_secret),
+            ..header
+        }
+    };
+
+    tx_primary_messages
+        .send(PrimaryMessage::HeaderBundle(HeaderBundle {
+            header: bundled_header.clone(),
+            parent_certificates: parent_certificates.clone(),
+        }))
+        .await
+        .unwrap();
+
+    let mut delivered_parent_ids = HashSet::new();
+    for _ in 0..parent_certificates.len() {
+        let delivered = tokio::time::timeout(
+            tokio::time::Duration::from_millis(300),
+            rx_consensus.recv(),
+        )
+        .await
+        .expect("bundled parent certificate was not delivered in time")
+        .unwrap();
+        delivered_parent_ids.insert(delivered.header.id);
+    }
+    let expected_parent_ids: HashSet<_> = parent_certificates
+        .iter()
+        .map(|certificate| certificate.header.id.clone())
+        .collect();
+    assert_eq!(delivered_parent_ids, expected_parent_ids);
+
+    let stored_header = tokio::time::timeout(tokio::time::Duration::from_millis(300), async {
+        loop {
+            if let Some(bytes) = store.read(bundled_header.id.to_vec()).await.unwrap() {
+                break bytes;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("header bundle did not make the header locally usable");
+    let stored_header: Header = bincode::deserialize(&stored_header).unwrap();
+    assert_eq!(stored_header, bundled_header);
 }
 
 #[tokio::test]

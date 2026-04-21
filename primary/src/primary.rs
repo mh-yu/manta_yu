@@ -5,7 +5,7 @@ use crate::error::DagError;
 use crate::garbage_collector::GarbageCollector;
 use crate::header_waiter::HeaderWaiter;
 use crate::helper::Helper;
-use crate::messages::{Certificate, Header, Vote};
+use crate::messages::{Certificate, Header, HeaderBundle, Vote};
 use crate::payload_receiver::PayloadReceiver;
 use crate::proposer::Proposer;
 use crate::synchronizer::Synchronizer;
@@ -32,6 +32,7 @@ pub type Round = u64;
 #[derive(Debug, Serialize, Deserialize)]
 pub enum PrimaryMessage {
     Header(Header),
+    HeaderBundle(HeaderBundle),
     Vote(Vote),
     Certificate(Certificate),
     SyncWeakCertificate(Certificate),
