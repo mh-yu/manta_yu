@@ -80,9 +80,15 @@ class LogParser:
                 results = p.map(self._parse_primaries, primaries)
         except (ValueError, IndexError, AttributeError) as e:
             raise ParseError(f'Failed to parse nodes\' logs: {e}')
-        proposals, commits, self.configs, primary_ips = zip(*results)
+        proposals, commits, vertex_commits, self.configs, primary_ips = zip(*results)
         self.proposals = self._merge_results([x.items() for x in proposals])
         self.commits = self._merge_results([x.items() for x in commits])
+        self.vertex_commits = self._merge_results([x.items() for x in vertex_commits])
+        if not self.commits and self.vertex_commits:
+            Print.warn(
+                'No payload-level proposal/commit logs were found in the primary logs; '
+                'TPS and latency metrics may remain zero even though DAG commits occurred'
+            )
 
         # Parse the workers logs.
         try:
@@ -198,6 +204,13 @@ class LogParser:
         tmp = [(d, self._to_posix(t)) for t, d in tmp]
         commits = self._merge_results([tmp])
 
+        tmp = findall(
+            r'\[+([^\] \[]+) [^\]]*\] DAG_COMMITTED path=\S+ round=\d+ node=\d+ digest=([^ ]+=)',
+            log
+        )
+        tmp = [(d, self._to_posix(t)) for t, d in tmp]
+        vertex_commits = self._merge_results([tmp])
+
         configs = {
             'header_size': int(
                 search(r'Header size .* (\d+)', log).group(1)
@@ -224,7 +237,7 @@ class LogParser:
 
         ip = search(r'booted on (\d+.\d+.\d+.\d+)', log).group(1)
         
-        return proposals, commits, configs, ip
+        return proposals, commits, vertex_commits, configs, ip
 
     def _parse_workers(self, log):
         if search(r'(?:panic|Error)', log) is not None:
@@ -294,6 +307,18 @@ class LogParser:
         self._end_to_end_latency_cache = mean(latency) if latency else 0
         return self._end_to_end_latency_cache
 
+    def _vertex_execution_duration(self):
+        if not self.vertex_commits:
+            return 0
+        start_candidates = [x for x in self.start if x is not None]
+        first_vertex_commit = min(self.vertex_commits.values())
+        if start_candidates:
+            start = min(start_candidates + [first_vertex_commit])
+        else:
+            start = first_vertex_commit
+        end = max(self.vertex_commits.values())
+        return max(0, end - start)
+
     def result(self):
         header_size = self.configs[0]['header_size']
         max_header_delay = self.configs[0]['max_header_delay']
@@ -307,6 +332,8 @@ class LogParser:
         consensus_tps, consensus_bps, _ = self._consensus_throughput()
         end_to_end_tps, end_to_end_bps, duration = self._end_to_end_throughput()
         end_to_end_latency = self._end_to_end_latency() * 1_000
+        if duration == 0:
+            duration = self._vertex_execution_duration()
 
         return (
             '\n'
