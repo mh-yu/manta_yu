@@ -325,7 +325,7 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3, enable_wait=True):
         'tx_size': 512,
         'duration': 120,
         'runs': 1,
-        'network_tag': 'no-delay-forpaper-test',
+        'network_tag': 'chitu-finalno-delay-test',
         'rtt_tag': 'no-delay',
     }
     node_params = {

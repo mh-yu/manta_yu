@@ -494,8 +494,10 @@ async fn process_certificates() {
 
     // Ensure the core sends the parents of the certificates to the proposer.
     let received = rx_parents.recv().await.unwrap();
-    let parents = ProposalParents::from(certificates.iter().map(|x| x.digest()).collect::<Vec<_>>());
-    assert_eq!(received, (parents, 1));
+    let received_parents: HashSet<_> = received.0.parents.into_iter().collect();
+    let expected_parents: HashSet<_> = certificates.iter().map(|x| x.digest()).collect();
+    assert_eq!(received.1, 1);
+    assert_eq!(received_parents, expected_parents);
 
     // Ensure the core sends the certificates to the consensus.
     for x in certificates.clone() {
@@ -513,7 +515,9 @@ async fn process_certificates() {
 
 #[tokio::test]
 async fn adaptive_wait_absorbs_late_certificate() {
-    let (name, secret) = keys().pop().unwrap();
+    let mut all_keys = keys();
+    let (header_author, _header_secret) = all_keys.pop().unwrap();
+    let (name, secret) = all_keys.pop().unwrap();
     let signature_service = SignatureService::new(secret);
 
     let (tx_sync_headers, _rx_sync_headers) = channel(1);
@@ -559,12 +563,14 @@ async fn adaptive_wait_absorbs_late_certificate() {
         .take(4)
         .map(|header| certificate(header))
         .collect();
+    assert_eq!(certificates[3].origin(), header_author);
+    assert_ne!(certificates[3].origin(), name);
 
     tx_primary_messages
         .send(PrimaryMessage::Header(certificates[3].header.clone()))
         .await
         .unwrap();
-    for vote in votes(&certificates[3].header).into_iter().take(2) {
+    for vote in votes(&certificates[3].header).into_iter().take(1) {
         tx_primary_messages
             .send(PrimaryMessage::Vote(vote))
             .await
