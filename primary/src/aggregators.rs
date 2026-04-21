@@ -1,5 +1,5 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
-use crate::error::{DagError, DagResult};
+use crate::error::DagResult;
 use crate::messages::{Certificate, Header, ProposalParents, Vote};
 use crate::primary::Round;
 use config::{Committee, Stake};
@@ -14,6 +14,7 @@ pub struct VotesAggregator {
     weight: Stake,
     votes: Vec<(PublicKey, Signature)>,
     used: HashSet<PublicKey>,
+    weak_certificate_sent: bool,
 }
 
 impl VotesAggregator {
@@ -22,6 +23,14 @@ impl VotesAggregator {
             weight: 0,
             votes: Vec::new(),
             used: HashSet::new(),
+            weak_certificate_sent: false,
+        }
+    }
+
+    fn certificate(&self, header: &Header) -> Certificate {
+        Certificate {
+            header: header.clone(),
+            votes: self.votes.clone(),
         }
     }
 
@@ -33,8 +42,10 @@ impl VotesAggregator {
     ) -> DagResult<Option<Certificate>> {
         let author = vote.author;
 
-        // Ensure it is the first time this authority votes.
-        ensure!(self.used.insert(author), DagError::AuthorityReuse(author));
+        // Retransmissions can happen when weak certificates replay votes.
+        if !self.used.insert(author) {
+            return Ok(None);
+        }
 
         self.votes.push((author, vote.signature));
         self.weight += committee.stake(&author);
@@ -47,12 +58,22 @@ impl VotesAggregator {
         );
         if self.weight >= committee.quorum_threshold() {
             self.weight = 0; // Ensures quorum is only reached once.
-            return Ok(Some(Certificate {
-                header: header.clone(),
-                votes: self.votes.clone(),
-            }));
+            return Ok(Some(self.certificate(header)));
         }
         Ok(None)
+    }
+
+    pub fn weak_certificate_if_ready(
+        &mut self,
+        validity_threshold: Stake,
+        header: &Header,
+    ) -> Option<Certificate> {
+        if self.weak_certificate_sent || self.weight < validity_threshold {
+            return None;
+        }
+
+        self.weak_certificate_sent = true;
+        Some(self.certificate(header))
     }
 }
 

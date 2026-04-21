@@ -34,6 +34,7 @@ pub enum PrimaryMessage {
     Header(Header),
     Vote(Vote),
     Certificate(Certificate),
+    SyncWeakCertificate(Certificate),
     CertificatesRequest(Vec<Digest>, /* requestor */ PublicKey),
 }
 

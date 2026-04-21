@@ -324,7 +324,7 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=3, enable_wait=True):
         'rate': [80000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 2,
+        'runs': 1,
         'network_tag': 'no-delay-forpaper-test',
         'rtt_tag': 'no-delay',
     }

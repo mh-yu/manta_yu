@@ -3,10 +3,37 @@ use super::*;
 use crate::common::{
     certificate, committee, committee_with_base_port, header, headers, keys, listener, votes,
 };
+use bytes::Bytes;
 use crypto::Signature;
-use futures::future::try_join_all;
+use futures::{SinkExt as _, StreamExt as _};
+use std::net::SocketAddr;
 use std::fs;
+use tokio::net::TcpListener;
 use tokio::sync::mpsc::channel;
+use tokio::task::JoinHandle;
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
+
+fn listener_until_weak_certificate(address: SocketAddr) -> JoinHandle<Bytes> {
+    tokio::spawn(async move {
+        let listener = TcpListener::bind(&address).await.unwrap();
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            let transport = Framed::new(socket, LengthDelimitedCodec::new());
+            let (mut writer, mut reader) = transport.split();
+            match reader.next().await {
+                Some(Ok(received)) => {
+                    writer.send(Bytes::from("Ack")).await.unwrap();
+                    let received = received.freeze();
+                    match bincode::deserialize(&received).unwrap() {
+                        PrimaryMessage::SyncWeakCertificate(_) => return received,
+                        _ => continue,
+                    }
+                }
+                _ => panic!("Failed to receive network message"),
+            }
+        }
+    })
+}
 
 #[tokio::test]
 async fn process_header() {
@@ -225,7 +252,7 @@ async fn process_votes() {
     let (_tx_headers_loopback, rx_headers_loopback) = channel(1);
     let (_tx_certificates_loopback, rx_certificates_loopback) = channel(1);
     let (_tx_headers, rx_headers) = channel(1);
-    let (tx_consensus, _rx_consensus) = channel(1);
+    let (tx_consensus, mut rx_consensus) = channel(1);
     let (tx_parents, _rx_parents) = channel(1);
 
     // Create a new test store.
@@ -260,30 +287,148 @@ async fn process_votes() {
         /* tx_proposer */ tx_parents,
     );
 
-    // Make the certificate we expect to receive.
-    let expected = certificate(&Header::default());
+    let local_header = header();
+    tx_primary_messages
+        .send(PrimaryMessage::Header(local_header.clone()))
+        .await
+        .unwrap();
 
-    // Spawn all listeners to receive our newly formed certificate.
-    let handles: Vec<_> = committee
-        .others_primaries(&name)
-        .iter()
-        .map(|(_, address)| listener(address.primary_to_primary))
-        .collect();
-
-    // Send a votes to the core.
-    for vote in votes(&Header::default()) {
+    // Send votes to the core and ensure it locally forms the certificate.
+    for vote in votes(&local_header) {
         tx_primary_messages
             .send(PrimaryMessage::Vote(vote))
             .await
             .unwrap();
     }
 
-    // Ensure all listeners got the certificate.
-    for received in try_join_all(handles).await.unwrap() {
-        match bincode::deserialize(&received).unwrap() {
-            PrimaryMessage::Certificate(x) => assert_eq!(x, expected),
-            x => panic!("Unexpected message: {:?}", x),
+    let delivered = tokio::time::timeout(
+        tokio::time::Duration::from_millis(300),
+        rx_consensus.recv(),
+    )
+    .await
+    .expect("local certificate was not delivered to consensus in time")
+    .unwrap();
+    assert_eq!(delivered, certificate(&local_header));
+}
+
+#[tokio::test]
+async fn adaptive_wait_broadcasts_weak_certificate_for_waiting_vertex() {
+    let mut all_keys = keys();
+    let (header_author, header_secret) = all_keys.pop().unwrap();
+    let (name, secret) = all_keys.pop().unwrap();
+    let signature_service = SignatureService::new(secret);
+
+    let committee = committee_with_base_port(13_350);
+
+    let (tx_sync_headers, _rx_sync_headers) = channel(2);
+    let (tx_sync_certificates, _rx_sync_certificates) = channel(2);
+    let (tx_primary_messages, rx_primary_messages) = channel(8);
+    let (_tx_headers_loopback, rx_headers_loopback) = channel(2);
+    let (_tx_certificates_loopback, rx_certificates_loopback) = channel(2);
+    let (_tx_headers, rx_headers) = channel(1);
+    let (tx_consensus, _rx_consensus) = channel(8);
+    let (tx_parents, _rx_parents) = channel(2);
+
+    let path = ".db_test_adaptive_wait_broadcasts_weak_certificate_for_waiting_vertex";
+    let _ = fs::remove_dir_all(path);
+    let store = Store::new(path).unwrap();
+
+    let synchronizer = Synchronizer::new(
+        name,
+        &committee,
+        store.clone(),
+        tx_sync_headers,
+        tx_sync_certificates,
+    );
+
+    Core::spawn(
+        name,
+        committee.clone(),
+        store,
+        synchronizer,
+        signature_service,
+        Arc::new(AtomicU64::new(0)),
+        50,
+        true,
+        rx_primary_messages,
+        rx_headers_loopback,
+        rx_certificates_loopback,
+        rx_headers,
+        tx_consensus,
+        tx_parents,
+    );
+
+    let remote_header = {
+        let header = Header {
+            author: header_author,
+            round: 1,
+            parents: Certificate::genesis(&committee)
+                .iter()
+                .map(|x| x.digest())
+                .collect(),
+            ..Header::default()
+        };
+        Header {
+            id: header.digest(),
+            signature: Signature::new(&header.digest(), &header_secret),
+            ..header
         }
+    };
+
+    tx_primary_messages
+        .send(PrimaryMessage::Header(remote_header.clone()))
+        .await
+        .unwrap();
+    for vote in votes(&remote_header)
+        .into_iter()
+        .filter(|vote| vote.author != name)
+        .take(committee.validity_threshold().saturating_sub(1) as usize)
+    {
+        tx_primary_messages
+            .send(PrimaryMessage::Vote(vote))
+            .await
+            .unwrap();
+    }
+
+    let weak_listener = listener_until_weak_certificate(
+        committee
+            .others_primaries(&name)
+            .iter()
+            .next()
+            .unwrap()
+            .1
+            .primary_to_primary,
+    );
+
+    let certificates: Vec<_> = headers()
+        .iter()
+        .take(3)
+        .map(|header| certificate(header))
+        .collect();
+    for certificate in certificates {
+        tx_primary_messages
+            .send(PrimaryMessage::Certificate(certificate))
+            .await
+            .unwrap();
+    }
+
+    let received = tokio::time::timeout(
+        tokio::time::Duration::from_millis(300),
+        weak_listener,
+    )
+    .await
+    .expect("weak certificate was not broadcast in time")
+    .unwrap();
+
+    match bincode::deserialize(&received).unwrap() {
+        PrimaryMessage::SyncWeakCertificate(certificate) => {
+            assert_eq!(certificate.header.id, remote_header.id);
+            assert_eq!(
+                certificate.votes.len(),
+                committee.validity_threshold() as usize
+            );
+        }
+        message => panic!("Unexpected message: {:?}", message),
     }
 }
 
