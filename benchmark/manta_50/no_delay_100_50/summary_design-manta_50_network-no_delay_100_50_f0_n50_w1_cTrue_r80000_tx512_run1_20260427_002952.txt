@@ -1,0 +1,32 @@
+
+-----------------------------------------
+ SUMMARY:
+-----------------------------------------
+ + CONFIG:
+ Design tag: manta_50
+ Network tag: no_delay_100_50
+ Faults: 0 node(s)
+ Committee size: 50 node(s)
+ Worker(s) per node: 1 worker(s)
+ Collocate primary and workers: True
+ Input rate: 80,000 tx/s
+ Transaction size: 512 B
+ Execution time: 123 s
+
+ Header size: 1,000 B
+ Max header delay: 100 ms
+ GC depth: 50 round(s)
+ Sync retry delay: 1,000 ms
+ Sync retry nodes: 4 node(s)
+ batch size: 500,000 B
+ Max batch delay: 50 ms
+
+ + RESULTS:
+ Consensus TPS: 17,093 tx/s
+ Consensus BPS: 8,751,409 B/s
+ Consensus latency: 13,305 ms
+
+ End-to-end TPS: 17,042 tx/s
+ End-to-end BPS: 8,725,728 B/s
+ End-to-end latency: 31,695 ms
+-----------------------------------------

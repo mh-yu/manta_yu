@@ -285,16 +285,17 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=2):
     ''' Run benchmarks on CloudLab '''
     bench_params = {
         'faults': 0,
-        'nodes': [10],
+        'nodes': [50],
         'workers': 1,
         'collocate': True,
-        'design_tag': 'narwhal_experiment3',
+        'design_tag': 'manta_50',
         'network_tag': 'no_delay_100_50',
         'rate_type': 'balanced',
-        'rate': [40000,60000,80000,100000,120000,140000,160000],
+        'rate': [10000],
+        # 'rate': [40000,60000,80000,100000,120000,140000,160000],
         'tx_size': 512,
-        'duration': 120,
-        'runs': 2,
+        'duration': 90,
+        'runs': 1,
     }
     node_params = {
         'header_size': 1_000,  # bytes
@@ -306,8 +307,8 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=2):
         'max_batch_delay': 50,  # ms
         'sigma': 1,
         'kappa': 2,
-        'reference': 4,
-        'coverage': 7,
+        'reference': 17,
+        'coverage': 33,
         's': 0.99,
     }
     try:

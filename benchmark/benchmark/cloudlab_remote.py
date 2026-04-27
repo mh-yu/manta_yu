@@ -724,7 +724,7 @@ class CloudLabBench:
             for (username, port), hostnames in hosts_by_config.items():
                 conn_kwargs = self._get_connection_kwargs({})
                 g = Group(*hostnames, user=username, port=port, connect_kwargs=conn_kwargs, connect_timeout=60)
-                g.run(' && '.join(cmd), hide=True)
+                g.run(' && '.join(cmd), hide=False)
                 
                 # Modify attack.rs AFTER git operations (so the file exists)
                 if trigger_attack is not None:
@@ -980,25 +980,23 @@ class CloudLabBench:
         
         # Upload files to all hosts
         repo_name = self.settings.repo_name
-        files_to_upload = [
+        shared_files_to_upload = [
             (PathMaker.committee_file(), f'{repo_name}/.committee.json'),
             (PathMaker.parameters_file(), f'{repo_name}/.parameters.json'),
         ]
-        
-        # Upload keys
-        for i, key in enumerate(keys):
-            files_to_upload.append(
-                (PathMaker.key_file(i), f'{repo_name}/{PathMaker.key_file(i)}')
-            )
-        
+
         Print.info('Uploading configuration files...')
         try:
-            for host in hosts:
+            for i, host in enumerate(hosts):
                 username = host.get('username', 'root')
                 hostname = host['hostname']
                 port = host.get('port', 22)
                 conn_kwargs = self._get_connection_kwargs({})
                 conn = Connection(hostname, user=username, port=port, connect_kwargs=conn_kwargs)
+                files_to_upload = list(shared_files_to_upload)
+                files_to_upload.append(
+                    (PathMaker.key_file(i), f'{repo_name}/{PathMaker.key_file(i)}')
+                )
                 current_local = None
                 current_remote = None
                 current_local_size = None
