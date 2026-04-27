@@ -149,10 +149,10 @@ def remote(ctx, debug=False):
         'rate_type': 'balanced',
         'design_tag': 'tusk-m_experiment3',
         'network_tag': 'geo',
-        'rate': [120000,160000,200000],
+        'rate': [240000],
         'tx_size': 512,
         'duration': 120,
-        'runs': 2,
+        'runs': 1,
     }
     node_params = {
         'header_size': 1_000,  # bytes

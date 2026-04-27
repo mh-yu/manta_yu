@@ -9,9 +9,9 @@
  Committee size: 50 node(s)
  Worker(s) per node: 1 worker(s)
  Collocate primary and workers: True
- Input rate: 160,000 tx/s
+ Input rate: 240,000 tx/s
  Transaction size: 512 B
- Execution time: 46 s
+ Execution time: 108 s
 
  Header size: 1,000 B
  Max header delay: 50 ms
@@ -22,11 +22,11 @@
  Max batch delay: 50 ms
 
  + RESULTS:
- Consensus TPS: 123,047 tx/s
- Consensus BPS: 62,999,853 B/s
- Consensus latency: 3,476 ms
+ Consensus TPS: 123,229 tx/s
+ Consensus BPS: 63,093,069 B/s
+ Consensus latency: 4,182 ms
 
- End-to-end TPS: 122,141 tx/s
- End-to-end BPS: 62,536,166 B/s
- End-to-end latency: 4,903 ms
+ End-to-end TPS: 122,677 tx/s
+ End-to-end BPS: 62,810,586 B/s
+ End-to-end latency: 8,252 ms
 -----------------------------------------

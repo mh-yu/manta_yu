@@ -7,7 +7,7 @@
     "repo": {
         "name": "tusk",
         "url": "https://github.com/mh-yu/manta_yu.git",
-        "branch": "imp-tusk-m"
+        "branch": "imp-tusk-m3"
     },
     "instances": {
         "type": "t3.2xlarge",
