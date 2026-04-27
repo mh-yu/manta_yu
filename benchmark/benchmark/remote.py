@@ -174,6 +174,8 @@ class Bench:
             f'(cd {self.settings.repo_name} && git fetch -f)',
             f'(cd {self.settings.repo_name} && git checkout -f {self.settings.branch})',
             f'(cd {self.settings.repo_name} && git pull -f)',
+            # Regular benchmark updates assume Rust is already installed; keep the
+            # runtime path setup light and avoid auto-repair/reinstall here.
             'source $HOME/.cargo/env',
             f'(cd {self.settings.repo_name}/node && {CommandMaker.compile()})',
             CommandMaker.alias_binaries(
@@ -234,7 +236,10 @@ class Bench:
         names = names[:len(names)-bench_parameters.faults]
         progress = progress_bar(names, prefix='Uploading config files:')
         for i, name in enumerate(progress):
-            for ip in committee.ips(name):
+            # Collocated deployments repeat the same IP for primary/workers of a
+            # single authority. Upload the shared config and per-authority key once
+            # per distinct host instead of once per role.
+            for ip in dict.fromkeys(committee.ips(name)):
                 c = Connection(ip, user='ubuntu', connect_kwargs=self.connect)
                 c.run(f'{CommandMaker.cleanup()} || true', hide=True)
                 c.put(PathMaker.committee_file(), '.')

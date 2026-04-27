@@ -672,19 +672,28 @@ class CloudLabBench:
             # Recover from corrupted rustup metadata (e.g. empty settings.toml).
             'if [ -f "$HOME/.rustup/settings.toml" ] && ! grep -q "^version" "$HOME/.rustup/settings.toml"; '
             'then echo "Detected corrupted rustup settings.toml; resetting it"; rm -f "$HOME/.rustup/settings.toml"; fi',
-            # Fully reinstall rustup/cargo when rustup is broken or missing.
-            'if ! rustup --version >/dev/null 2>&1; then '
-            'echo "rustup not healthy; performing full reinstall"; '
-            'rm -rf "$HOME/.rustup" "$HOME/.cargo"; '
-            'curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable; '
-            'fi',
             # Ensure rustup/cargo are on PATH in the current shell (no subshell).
             'if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi; export PATH="$HOME/.cargo/bin:$PATH"',
-            'command -v rustup >/dev/null 2>&1 || (echo "rustup not found after setup" && exit 1)',
-            'command -v cargo >/dev/null 2>&1 || (echo "cargo not found after setup" && exit 1)',
-            'rustup toolchain install stable',
-            'rustup default stable',
-            'rustup component add cargo rustc rust-std || true',
+            # These rustup repair/reinstall steps are intentionally disabled during
+            # regular benchmark runs. The environment should already exist after the
+            # first successful install, and auto-repair here caused slow startups
+            # plus flaky toolchain update failures on some nodes.
+            # 'if ! rustup --version >/dev/null 2>&1; then '
+            # 'echo "rustup not healthy; performing full reinstall"; '
+            # 'rm -rf "$HOME/.rustup" "$HOME/.cargo"; '
+            # 'curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable; '
+            # 'fi',
+            # 'command -v rustup >/dev/null 2>&1 || (echo "rustup not found after setup" && exit 1)',
+            # 'command -v cargo >/dev/null 2>&1 || (echo "cargo not found after setup" && exit 1)',
+            # 'rustup toolchain install stable',
+            # 'rustup default stable',
+            # 'rustup component add cargo rustc rust-std || true',
+            'if command -v rustup >/dev/null 2>&1 && ! rustup show active-toolchain >/dev/null 2>&1; then '
+            'echo "rustup has no default toolchain; trying existing stable"; '
+            'rustup toolchain list | grep -q "^stable" && rustup default stable >/dev/null 2>&1 || '
+            '(echo "stable toolchain missing; run fab cloudlab-install" && exit 1); '
+            'fi',
+            'cargo --version >/dev/null 2>&1 || (echo "cargo not available; run fab cloudlab-install" && exit 1)',
             # Build prerequisites and diagnostics for common cc-rs failures.
             'if ! command -v cc >/dev/null 2>&1; then '
             'echo "C compiler not found; installing build-essential"; '
@@ -724,7 +733,7 @@ class CloudLabBench:
             for (username, port), hostnames in hosts_by_config.items():
                 conn_kwargs = self._get_connection_kwargs({})
                 g = Group(*hostnames, user=username, port=port, connect_kwargs=conn_kwargs, connect_timeout=60)
-                g.run(' && '.join(cmd), hide=True)
+                g.run(' && '.join(cmd), hide=False)
                 
                 # Modify attack.rs AFTER git operations (so the file exists)
                 if trigger_attack is not None:
@@ -980,25 +989,23 @@ class CloudLabBench:
         
         # Upload files to all hosts
         repo_name = self.settings.repo_name
-        files_to_upload = [
+        shared_files_to_upload = [
             (PathMaker.committee_file(), f'{repo_name}/.committee.json'),
             (PathMaker.parameters_file(), f'{repo_name}/.parameters.json'),
         ]
-        
-        # Upload keys
-        for i, key in enumerate(keys):
-            files_to_upload.append(
-                (PathMaker.key_file(i), f'{repo_name}/{PathMaker.key_file(i)}')
-            )
-        
+
         Print.info('Uploading configuration files...')
         try:
-            for host in hosts:
+            for i, host in enumerate(hosts):
                 username = host.get('username', 'root')
                 hostname = host['hostname']
                 port = host.get('port', 22)
                 conn_kwargs = self._get_connection_kwargs({})
                 conn = Connection(hostname, user=username, port=port, connect_kwargs=conn_kwargs)
+                files_to_upload = list(shared_files_to_upload)
+                files_to_upload.append(
+                    (PathMaker.key_file(i), f'{repo_name}/{PathMaker.key_file(i)}')
+                )
                 current_local = None
                 current_remote = None
                 current_local_size = None
