@@ -5,9 +5,9 @@
     },
     "port": 5000,
     "repo": {
-        "name": "tusk",
+        "name": "manta_yu",
         "url": "https://github.com/mh-yu/manta_yu.git",
-        "branch": "imp-tusk-m3"
+        "branch": "imp-tusk-m"
     },
     "instances": {
         "type": "t3.2xlarge",
