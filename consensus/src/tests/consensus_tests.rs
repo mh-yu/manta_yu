@@ -41,6 +41,13 @@ pub fn mock_committee() -> Committee {
     }
 }
 
+fn mock_committee_with_params(sigma: usize, kappa: usize) -> Committee {
+    let mut committee = mock_committee();
+    committee.sigma = sigma;
+    committee.kappa = kappa;
+    committee
+}
+
 // Fixture
 fn mock_certificate(
     origin: PublicKey,
@@ -132,6 +139,56 @@ async fn commit_one() {
     }
     let certificate = rx_output.recv().await.unwrap();
     assert_eq!(certificate.round(), 2);
+}
+
+#[test]
+fn regular_commit_candidate_keeps_sigma_one_behavior() {
+    let committee = mock_committee();
+    let consensus = Consensus {
+        committee: committee.clone(),
+        authorities: committee.authorities.keys().copied().collect(),
+        author_to_node: committee
+            .authorities
+            .keys()
+            .copied()
+            .enumerate()
+            .map(|(index, authority)| (authority, index))
+            .collect(),
+        gc_depth: 50,
+        rx_primary: channel(1).1,
+        tx_primary: channel(1).0,
+        tx_output: channel(1).0,
+        genesis: Certificate::genesis(&committee),
+    };
+
+    assert_eq!(consensus.regular_commit_candidate(4), None);
+    assert_eq!(consensus.regular_commit_candidate(5), Some((2, 3)));
+    assert_eq!(consensus.regular_commit_candidate(7), Some((4, 5)));
+}
+
+#[test]
+fn regular_commit_candidate_special_cases_sigma_two() {
+    let committee = mock_committee_with_params(2, 2);
+    let consensus = Consensus {
+        committee: committee.clone(),
+        authorities: committee.authorities.keys().copied().collect(),
+        author_to_node: committee
+            .authorities
+            .keys()
+            .copied()
+            .enumerate()
+            .map(|(index, authority)| (authority, index))
+            .collect(),
+        gc_depth: 50,
+        rx_primary: channel(1).1,
+        tx_primary: channel(1).0,
+        tx_output: channel(1).0,
+        genesis: Certificate::genesis(&committee),
+    };
+
+    assert_eq!(consensus.regular_commit_candidate(6), None);
+    assert_eq!(consensus.regular_commit_candidate(8), Some((4, 6)));
+    assert_eq!(consensus.regular_commit_candidate(12), Some((8, 10)));
 }
 
 #[tokio::test]

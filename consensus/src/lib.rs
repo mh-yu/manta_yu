@@ -211,6 +211,28 @@ impl Consensus {
             .unwrap_or(false)
     }
 
+    fn regular_commit_candidate(&self, round: Round) -> Option<(Round, Round)> {
+        let step_length = self.committee.solid_step_length();
+        let wave_length = self.committee.solid_wave_length();
+
+        // Temporary special-case for sigma=2, kappa=2 so regular fallback
+        // reuses the same support round as the earlier attempt.
+        if step_length == 2 && wave_length == 4 {
+            if round % wave_length != 0 || round < 2 * wave_length {
+                return None;
+            }
+
+            return Some((round - wave_length, round - step_length));
+        }
+
+        let r = round.checked_sub(step_length)?;
+        if r % wave_length != 0 || r < 2 * wave_length {
+            return None;
+        }
+
+        Some((r - wave_length, r - step_length))
+    }
+
     async fn try_commit(
         &mut self,
         state: &mut State,
@@ -471,25 +493,12 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
                 }
             }
 
-            // Narwhal-style commit loop adapted to solid waves:
-            // only commit on solid-wave boundary rounds, and validate the leader from the
-            // previous solid wave using the previous solid-step round as support.
-            let step_length = self.committee.solid_step_length();
-            let wave_length = self.committee.solid_wave_length();
-            let Some(r) = round.checked_sub(step_length) else {
-                continue;
-            };
-            if r % wave_length != 0 {
-                continue;
+            // Narwhal-style commit loop adapted to solid waves.
+            if let Some((leader_round, support_round)) = self.regular_commit_candidate(round) {
+                let _ = self
+                    .try_commit(&mut state, round, leader_round, support_round)
+                    .await;
             }
-            if r < 2 * wave_length {
-                continue;
-            }
-            let leader_round = r - wave_length;
-            let support_round = r - step_length;
-            let _ = self
-                .try_commit(&mut state, round, leader_round, support_round)
-                .await;
         }
     }
 
