@@ -150,7 +150,7 @@ def remote(ctx, debug=False):
         'design_tag': 'manta50_test',
         'network_tag': 'geo',
         # 'rate': [120000,160000,200000],
-        'rate': [80000],
+        'rate': [100000],
         'tx_size': 512,
         'duration': 120,
         'runs': 1,
@@ -163,7 +163,7 @@ def remote(ctx, debug=False):
         'sync_retry_nodes': 33,  # number of nodes
         'batch_size': 500000,  # bytes
         'max_batch_delay': 50,  # ms
-        'sigma': 2,
+        'sigma': 1,
         'kappa': 2,
         'reference': 17,
         'coverage': 33,

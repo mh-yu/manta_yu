@@ -203,12 +203,78 @@ impl Consensus {
         Some((support_round + step_length - wave_length, support_round))
     }
 
-    fn early_commit_threshold_reached(&self, state: &State, support_round: Round) -> bool {
-        state
+    fn support_stake_for_leader(
+        &self,
+        state: &State,
+        support_round: Round,
+        leader_header_id: &Digest,
+        leader_digest: &Digest,
+        capture_entries: bool,
+    ) -> Option<(u32, Vec<usize>, Option<Vec<String>>)> {
+        let support_round_map = state.dag.get(&support_round)?;
+        let mut support_nodes = Vec::new();
+        let mut support_entries = if capture_entries {
+            Some(Vec::with_capacity(support_round_map.len()))
+        } else {
+            None
+        };
+        let mut stake = 0;
+
+        for (_, certificate) in support_round_map.values() {
+            let vertices = &certificate.header.solid_wave_vertices;
+            let supports =
+                vertices.contains(leader_header_id) || vertices.contains(leader_digest);
+            let node_id = self.author_to_node_id(certificate.origin());
+
+            if supports {
+                support_nodes.push(node_id);
+                stake += self.committee.stake(&certificate.origin());
+            }
+
+            if let Some(entries) = support_entries.as_mut() {
+                entries.push(format!(
+                    "[{},{}]:support={} solid=[{}] merged=[{}]",
+                    certificate.round(),
+                    node_id,
+                    supports,
+                    self.render_digest_set(state, &certificate.header.solid_wave_vertices),
+                    self.render_digest_set(state, &certificate.header.solid_wave_vertices_merged),
+                ));
+            }
+        }
+
+        Some((stake, support_nodes, support_entries))
+    }
+
+    fn early_commit_threshold_reached(
+        &self,
+        state: &State,
+        leader_round: Round,
+        support_round: Round,
+    ) -> bool {
+        let enough_support_round_certificates = state
             .dag
             .get(&support_round)
             .map(|round_map| round_map.len() >= self.committee.validity_threshold() as usize)
-            .unwrap_or(false)
+            .unwrap_or(false);
+        if !enough_support_round_certificates {
+            return false;
+        }
+
+        let (leader_digest, leader) = match self.leader(leader_round, &state.dag) {
+            Some((digest, cert)) => (digest.clone(), cert.clone()),
+            None => return false,
+        };
+
+        self.support_stake_for_leader(
+            state,
+            support_round,
+            &leader.header.id,
+            &leader_digest,
+            false,
+        )
+        .map(|(stake, _, _)| stake >= self.committee.validity_threshold())
+        .unwrap_or(false)
     }
 
     fn regular_commit_candidate(&self, round: Round) -> Option<(Round, Round)> {
@@ -290,8 +356,15 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
             );
         }
 
-        let support_round_map = match state.dag.get(&support_round) {
-            Some(map) => map,
+        let debug_logging = log_enabled!(log::Level::Debug);
+        let (stake, mut support_nodes, support_entries) = match self.support_stake_for_leader(
+            state,
+            support_round,
+            &leader_header_id,
+            &leader_digest,
+            debug_logging,
+        ) {
+            Some(result) => result,
             None => {
                 debug!(
                     "Support round {} is missing from local DAG while checking leader_round {}",
@@ -300,36 +373,6 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
                 return false;
             }
         };
-        let debug_logging = log_enabled!(log::Level::Debug);
-        let mut support_nodes = Vec::new();
-        let mut support_entries = if debug_logging {
-            Some(Vec::with_capacity(support_round_map.len()))
-        } else {
-            None
-        };
-        let mut stake = 0;
-        for (_, certificate) in support_round_map.values() {
-            let vertices = &certificate.header.solid_wave_vertices;
-            let supports =
-                vertices.contains(&leader_header_id) || vertices.contains(&leader_digest);
-            let node_id = self.author_to_node_id(certificate.origin());
-
-            if supports {
-                support_nodes.push(node_id);
-                stake += self.committee.stake(&certificate.origin());
-            }
-
-            if let Some(entries) = support_entries.as_mut() {
-                entries.push(format!(
-                    "[{},{}]:support={} solid=[{}] merged=[{}]",
-                    certificate.round(),
-                    node_id,
-                    supports,
-                    self.render_digest_set(state, &certificate.header.solid_wave_vertices),
-                    self.render_digest_set(state, &certificate.header.solid_wave_vertices_merged),
-                ));
-            }
-        }
         support_nodes.sort_unstable();
         let threshold = self.committee.validity_threshold();
         let leader_node = self.author_to_node_id(leader.origin());
@@ -486,7 +529,7 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
             // self.visualize_dag(&state, round);
 
             if let Some((leader_round, support_round)) = self.early_commit_candidate(round) {
-                if self.early_commit_threshold_reached(&state, support_round) {
+                if self.early_commit_threshold_reached(&state, leader_round, support_round) {
                     let _ = self
                         .try_commit(&mut state, round, leader_round, support_round)
                         .await;

@@ -191,6 +191,68 @@ fn regular_commit_candidate_special_cases_sigma_two() {
     assert_eq!(consensus.regular_commit_candidate(12), Some((8, 10)));
 }
 
+#[test]
+fn early_commit_gate_requires_leader_support_stake() {
+    let mut keys: Vec<_> = keys().into_iter().map(|(x, _)| x).collect();
+    keys.sort();
+
+    let committee = mock_committee();
+    let consensus = Consensus {
+        committee: committee.clone(),
+        authorities: committee.authorities.keys().copied().collect(),
+        author_to_node: committee
+            .authorities
+            .keys()
+            .copied()
+            .enumerate()
+            .map(|(index, authority)| (authority, index))
+            .collect(),
+        gc_depth: 50,
+        rx_primary: channel(1).1,
+        tx_primary: channel(1).0,
+        tx_output: channel(1).0,
+        genesis: Certificate::genesis(&committee),
+    };
+
+    let genesis = Certificate::genesis(&committee)
+        .iter()
+        .map(|x| x.digest())
+        .collect::<BTreeSet<_>>();
+    let mut state = State::new(Certificate::genesis(&committee));
+
+    let nodes: Vec<_> = keys.iter().cloned().take(3).collect();
+    let (round_one, parents) = make_certificates(1, 1, &genesis, &nodes);
+    for certificate in round_one {
+        state.insert(certificate);
+    }
+
+    let (leader_2_digest, leader_2_certificate) = mock_certificate(keys[0], 2, parents.clone());
+    state.insert(leader_2_certificate);
+    let nodes: Vec<_> = keys.iter().cloned().skip(1).collect();
+    let (round_two, mut parents) = make_certificates(2, 2, &parents, &nodes);
+    for certificate in round_two {
+        state.insert(certificate);
+    }
+
+    let mut next_parents = BTreeSet::new();
+
+    let (digest, certificate) = mock_certificate(keys[1], 3, parents.clone());
+    state.insert(certificate);
+    next_parents.insert(digest);
+
+    let (digest, certificate) = mock_certificate(keys[2], 3, parents.clone());
+    state.insert(certificate);
+    next_parents.insert(digest);
+
+    parents.insert(leader_2_digest);
+    let (digest, certificate) = mock_certificate(keys[0], 3, parents);
+    state.insert(certificate);
+    next_parents.insert(digest);
+
+    assert!(state.dag.get(&3).unwrap().len() >= committee.validity_threshold() as usize);
+    assert!(!consensus.early_commit_threshold_reached(&state, 2, 3));
+}
+
 #[tokio::test]
 async fn commit_on_support_round_without_waiting_for_trigger_round() {
     let keys: Vec<_> = keys().into_iter().map(|(x, _)| x).collect();
