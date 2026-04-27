@@ -1,0 +1,59 @@
+
+-----------------------------------------
+ SUMMARY:
+-----------------------------------------
+ + CONFIG:
+ Design tag: manta50_test_m3
+ Network tag: no_delay_100_50
+ Faults: 0 node(s)
+ Committee size: 50 node(s)
+ Worker(s) per node: 1 worker(s)
+ Collocate primary and workers: True
+ Input rate: 1,000 tx/s
+ Transaction size: 512 B
+ Execution time: 125 s
+
+ Header size: 1,000 B
+ Max header delay: 50 ms
+ GC depth: 50 round(s)
+ Sync retry delay: 1,000 ms
+ Sync retry nodes: 33 node(s)
+ batch size: 500,000 B
+ Max batch delay: 50 ms
+
+ + BENCH PARAMS:
+ faults: 0
+ nodes: [50]
+ workers: 1
+ collocate: True
+ design_tag: manta50_test_m3
+ network_tag: no_delay_100_50
+ rate_type: balanced
+ rate: [1000]
+ tx_size: 512
+ duration: 120
+ runs: 1
+
+ + NODE PARAMS:
+ header_size: 1000
+ max_header_delay: 50
+ gc_depth: 50
+ sync_retry_delay: 1000
+ sync_retry_nodes: 33
+ batch_size: 500000
+ max_batch_delay: 50
+ sigma: 1
+ kappa: 2
+ reference: 17
+ coverage: 33
+ s: 0.99
+
+ + RESULTS:
+ Consensus TPS: 41 tx/s
+ Consensus BPS: 21,120 B/s
+ Consensus latency: 7,003 ms
+
+ End-to-end TPS: 41 tx/s
+ End-to-end BPS: 21,108 B/s
+ End-to-end latency: 6,912 ms
+-----------------------------------------
