@@ -291,15 +291,16 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=2):
         'design_tag': 'manta_50',
         'network_tag': 'no_delay_100_50',
         'rate_type': 'balanced',
-        'rate': [10000],
+        'rate': [1000],
         # 'rate': [40000,60000,80000,100000,120000,140000,160000],
         'tx_size': 512,
         'duration': 90,
         'runs': 1,
     }
+
     node_params = {
         'header_size': 1_000,  # bytes
-        'max_header_delay': 100,  # ms
+        'max_header_delay': 50,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 1000,  # ms
         'sync_retry_nodes': 4,  # number of nodes

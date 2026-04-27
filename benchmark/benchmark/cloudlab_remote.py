@@ -672,19 +672,33 @@ class CloudLabBench:
             # Recover from corrupted rustup metadata (e.g. empty settings.toml).
             'if [ -f "$HOME/.rustup/settings.toml" ] && ! grep -q "^version" "$HOME/.rustup/settings.toml"; '
             'then echo "Detected corrupted rustup settings.toml; resetting it"; rm -f "$HOME/.rustup/settings.toml"; fi',
-            # Fully reinstall rustup/cargo when rustup is broken or missing.
-            'if ! rustup --version >/dev/null 2>&1; then '
-            'echo "rustup not healthy; performing full reinstall"; '
-            'rm -rf "$HOME/.rustup" "$HOME/.cargo"; '
-            'curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable; '
-            'fi',
-            # Ensure rustup/cargo are on PATH in the current shell (no subshell).
-            'if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi; export PATH="$HOME/.cargo/bin:$PATH"',
-            'command -v rustup >/dev/null 2>&1 || (echo "rustup not found after setup" && exit 1)',
-            'command -v cargo >/dev/null 2>&1 || (echo "cargo not found after setup" && exit 1)',
-            'rustup toolchain install stable',
-            'rustup default stable',
-            'rustup component add cargo rustc rust-std || true',
+            # Ensure rustup/cargo are on PATH in the current shell before health checks.
+            'export PATH="$HOME/.cargo/bin:$PATH"; '
+            'if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi',
+            # These rustup repair/reinstall steps are intentionally disabled during
+            # regular benchmark runs. The environment should already exist after the
+            # first successful install, and auto-repair here caused slow startups
+            # plus flaky toolchain update failures on some nodes.
+            # 'if ! command -v rustup >/dev/null 2>&1 || ! rustup --version >/dev/null 2>&1; then '
+            # 'echo "rustup not healthy; performing full reinstall"; '
+            # 'rm -rf "$HOME/.rustup" "$HOME/.cargo"; '
+            # 'curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable; '
+            # 'fi',
+            # 'if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi; export PATH="$HOME/.cargo/bin:$PATH"',
+            # 'command -v rustup >/dev/null 2>&1 || (echo "rustup not found after setup" && exit 1)',
+            # 'if ! rustup toolchain list | grep -q "^stable"; then '
+            # 'echo "stable toolchain missing; installing minimal stable toolchain"; '
+            # 'rustup set profile minimal; '
+            # 'rustup toolchain install stable --profile minimal; '
+            # 'fi',
+            # 'rustup default stable >/dev/null 2>&1 || ('
+            # 'echo "stable toolchain looks unhealthy; reinstalling toolchain"; '
+            # 'rm -rf "$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu" '
+            # '"$HOME/.rustup/update-hashes/stable-x86_64-unknown-linux-gnu"; '
+            # 'rustup set profile minimal; '
+            # 'rustup toolchain install stable --profile minimal && rustup default stable'
+            # ')',
+            'cargo --version >/dev/null 2>&1 || (echo "cargo not available; run fab cloudlab-install" && exit 1)',
             # Build prerequisites and diagnostics for common cc-rs failures.
             'if ! command -v cc >/dev/null 2>&1; then '
             'echo "C compiler not found; installing build-essential"; '
