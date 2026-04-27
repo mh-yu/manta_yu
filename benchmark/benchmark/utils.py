@@ -162,6 +162,20 @@ class Print:
         print(f'Caused by: \n{"".join(causes)}\n')
 
 
+def format_parameters_section(title, parameters):
+    assert isinstance(title, str)
+    assert parameters is None or isinstance(parameters, dict)
+
+    lines = [f' + {title}:\n']
+    if not parameters:
+        lines += [' (none)\n']
+        return ''.join(lines)
+
+    for key, value in parameters.items():
+        lines += [f' {key}: {value}\n']
+    return ''.join(lines)
+
+
 def write_failure_summary(
     filename,
     *,
@@ -175,6 +189,8 @@ def write_failure_summary(
     tx_size,
     run,
     error,
+    bench_params=None,
+    node_params=None,
 ):
     assert isinstance(filename, str)
     parent = dirname(filename)
@@ -196,6 +212,10 @@ def write_failure_summary(
         f' Input rate: {rate:,} tx/s\n'
         f' Transaction size: {tx_size:,} B\n'
         f' Run: {run}\n'
+        '\n'
+        f'{format_parameters_section("BENCH PARAMS", bench_params)}'
+        '\n'
+        f'{format_parameters_section("NODE PARAMS", node_params)}'
         '\n'
         ' + RESULTS:\n'
         ' Status: FAILED\n'

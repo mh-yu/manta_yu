@@ -1601,7 +1601,11 @@ SCRIPTEOF'''
                                 design_tag=bench_parameters.design_tag,
                                 network_tag=bench_parameters.network_tag,
                             )
-                            result.print(summary_file)
+                            result.print(
+                                summary_file,
+                                bench_params=bench_parameters_dict,
+                                node_params=node_parameters_dict,
+                            )
                         except (subprocess.SubprocessError, GroupException, ParseError) as e:
                             self.kill(hosts=selected_hosts)
                             if isinstance(e, GroupException):
@@ -1618,6 +1622,8 @@ SCRIPTEOF'''
                                 tx_size=bench_parameters.tx_size,
                                 run=run + 1,
                                 error=str(e),
+                                bench_params=bench_parameters_dict,
+                                node_params=node_parameters_dict,
                             )
                             Print.error(BenchError('Benchmark failed', e))
                             continue

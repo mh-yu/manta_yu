@@ -8,7 +8,7 @@ from os.path import dirname
 from re import findall, search
 from statistics import mean
 
-from benchmark.utils import Print
+from benchmark.utils import Print, format_parameters_section
 
 
 class ParseError(Exception):
@@ -297,12 +297,20 @@ class LogParser:
             '-----------------------------------------\n'
         )
 
-    def print(self, filename):
+    def print(self, filename, bench_params=None, node_params=None):
         assert isinstance(filename, str)
         parent = dirname(filename)
         if parent:
             makedirs(parent, exist_ok=True)
         body = self.result()
+        sections = []
+        if bench_params is not None or node_params is not None:
+            sections += ['\n']
+            sections += [format_parameters_section('BENCH PARAMS', bench_params)]
+            sections += ['\n']
+            sections += [format_parameters_section('NODE PARAMS', node_params)]
+            sections += ['\n']
+            body = body.replace('\n + RESULTS:\n', ''.join(sections) + ' + RESULTS:\n', 1)
         with open(filename, 'w') as f:
             f.write(body)
         Print.info(body)

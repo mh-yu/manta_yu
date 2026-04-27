@@ -150,7 +150,7 @@ def remote(ctx, debug=False):
         'design_tag': 'manta50_test',
         'network_tag': 'geo',
         # 'rate': [120000,160000,200000],
-        'rate': [100000],
+        'rate': [80000],
         'tx_size': 512,
         'duration': 120,
         'runs': 1,
