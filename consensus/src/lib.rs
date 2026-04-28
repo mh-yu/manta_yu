@@ -188,7 +188,9 @@ impl Consensus {
         });
     }
 
-    fn early_commit_candidate(&self, support_round: Round) -> Option<(Round, Round)> {
+    /// Returns the leader/support pair for the flexible commit path.
+    /// This path tries to commit as soon as the support round itself becomes strong enough.
+    fn flexible_commit_candidate(&self, support_round: Round) -> Option<(Round, Round)> {
         let step_length = self.committee.solid_step_length();
         let wave_length = self.committee.solid_wave_length();
         let trigger_base = support_round.checked_add(step_length)?;
@@ -203,7 +205,7 @@ impl Consensus {
         Some((support_round + step_length - wave_length, support_round))
     }
 
-    fn early_commit_threshold_reached(&self, state: &State, support_round: Round) -> bool {
+    fn flexible_commit_threshold_reached(&self, state: &State, support_round: Round) -> bool {
         state
             .dag
             .get(&support_round)
@@ -241,8 +243,8 @@ impl Consensus {
         // `leader.header.id` is the leader block's *header id*.
         //
         // As in Narwhal, a single support check decides whether we can commit this leader.
-        // The Manta-specific part is the support basis: rather than direct parent edges, we
-        // use `solid_wave_vertices` from the support round.
+        // In Manta, both the flexible and regular commit paths share the same validity check:
+        // rather than direct parent edges, they use `solid_wave_vertices` from the support round.
         let leader_header_id = leader.header.id.clone();
         if log_enabled!(log::Level::Debug) {
             let header_pos = self.find_certificate_in_dag(state, &leader_header_id);
@@ -463,17 +465,18 @@ leader_digest(cert)= {:?} -> {:?} (node_id={})",
             // Emit DAG visualization for extract_final_dag / extract_dag_out (full DAG per round).
             // self.visualize_dag(&state, round);
 
-            if let Some((leader_round, support_round)) = self.early_commit_candidate(round) {
-                if self.early_commit_threshold_reached(&state, support_round) {
+            // Flexible commit: once the support round has f+1 visible support locally,
+            // attempt commit immediately instead of waiting for the regular boundary.
+            if let Some((leader_round, support_round)) = self.flexible_commit_candidate(round) {
+                if self.flexible_commit_threshold_reached(&state, support_round) {
                     let _ = self
                         .try_commit(&mut state, round, leader_round, support_round)
                         .await;
                 }
             }
 
-            // Narwhal-style commit loop adapted to solid waves:
-            // only commit on solid-wave boundary rounds, and validate the leader from the
-            // previous solid wave using the previous solid-step round as support.
+            // Regular commit: retry commits on the protocol's scheduled boundary using
+            // the predetermined leader/support pair for the current solid-wave cadence.
             let step_length = self.committee.solid_step_length();
             let wave_length = self.committee.solid_wave_length();
             let Some(r) = round.checked_sub(step_length) else {

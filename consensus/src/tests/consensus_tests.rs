@@ -135,7 +135,7 @@ async fn commit_one() {
 }
 
 #[tokio::test]
-async fn commit_on_support_round_without_waiting_for_trigger_round() {
+async fn flexible_commit_on_support_round_without_waiting_for_trigger_round() {
     let keys: Vec<_> = keys().into_iter().map(|(x, _)| x).collect();
     let genesis = Certificate::genesis(&mock_committee())
         .iter()
