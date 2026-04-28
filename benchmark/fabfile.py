@@ -147,8 +147,8 @@ def remote(ctx, debug=False):
         'workers': 1,
         'collocate': True,
         'rate_type': 'balanced',
-        'design_tag': 'tusk-m_experiment3',
-        'network_tag': 'geo',
+        'design_tag': '',
+        'network_tag': '',
         'rate': [120000,160000,200000],
         'tx_size': 512,
         'duration': 120,
@@ -288,8 +288,8 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=2):
         'nodes': [10],
         'workers': 1,
         'collocate': True,
-        'design_tag': 'narwhal_experiment3',
-        'network_tag': 'no_delay_100_50',
+        'design_tag': '',
+        'network_tag': '',
         'rate_type': 'balanced',
         'rate': [40000,60000,80000,100000,120000,140000,160000],
         'tx_size': 512,
@@ -308,7 +308,6 @@ def cloudlab_remote(ctx, debug=False, sigma=1, kappa=2):
         'kappa': 2,
         'reference': 4,
         'coverage': 7,
-        's': 0.99,
     }
     try:
         CloudLabBench(ctx).run(bench_params, node_params, debug)
